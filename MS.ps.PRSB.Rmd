@@ -1,0 +1,1317 @@
+---
+title: "Visual search mimics configural processing: behavioural and computational evidence"
+author:
+- address: 1200 E. California Blvd., Pasadena, California, CA91125
+  affiliation: 1, 3
+  email: odperez@caltech.edu 
+  name: Omar D. Perez
+  corresponding: yes
+- affiliation: 2
+  name: Sanjay Narasiwodeyar
+- address: 11200 SW 8th Street, CASE 450, Miami, Florida, 33199
+  affiliation: 2
+  email: fasoto@fiu.edu
+  name: Fabian A. Soto
+  corresponding: no
+affiliation:
+- id: 1
+  institution: Division of the Humanities and Social Sciences, California Institute
+    of Technology, Pasadena, California
+- id: 2
+  institution: Department of Psychology, Florida International University, Florida, USA
+- id: 3
+  institution: Nuffield College CESS-Santiago, Facultad de Administracion y Economia, Universidad de Santiago, Santiago, Chile
+output:
+  pdf_document: papaja::apa6_pdf
+  html_document: default
+  word_document: papaja::apa6_word
+# class: man
+documentclass: "apa6"
+classoption: "doc"
+figsintext: no
+keep_tex: yes
+keywords: generalisation, Rescorla-Wagner, configural, summation, elemental, visual search
+lang: english
+lineno: yes
+note: null
+bibliography: ["library.bib", "r-references.bib"]
+csl: proceedings-of-the-royal-society-b.csl
+header-includes:
+  - \usepackage{xcolor}
+  - \usepackage{setspace}
+  - \AtBeginEnvironment{tabular}{\doublespacing}
+  - \AtBeginEnvironment{lltable}{\doublespacing}
+  - \captionsetup[table]{font={stretch=1.5}}
+  - \captionsetup[figure]{font={stretch=1}}
+  - \setlength{\skip\footins}{1cm}
+  - \setlength{\footnotesep}{0.5cm}
+shorttitle: CONFIGURAL PROCESSING AS VISUAL SEARCH
+abstract: Theories of generalisation distinguish between elemental and configural stimulus processing, depending on whether stimulus in a compound are processed independently or as distinct entities. Evidence for elemental processing comes from findings of summation in animals, whereas configural processing is supported by experiments that fail to find this effect when similar stimuli are employed. In humans, by contrast, summation is robust and independent of similarity. We show how these results are best explained by an alternative view in which generalisation comes about from a visual search process in which subjects process the most predictive or salient stimulus in a compound. We offer empirical support for this theory in three human experiments on causal learning and formalize a new elemental visual search model based on reinforcement learning principles which can capture the present and previous data on generalisation, bridging two different research areas of psychology into a unitary framework.  
+---
+
+```{r, echo=FALSE, include=FALSE}
+
+library(ggpubr); library(papaja); library(citr); library(nlme); library(bookdown); library(tidyr); library(reshape2); library(cowplot); library(Rmisc)
+
+
+```
+
+```{r softmax_function, echo=FALSE, message=FALSE, include=FALSE, eval=TRUE}
+
+softmax = function(alpha, v, temp_param=30) {
+  # this function takes as arguments 
+  # alpha: vector with saliencies for each stim
+  # v: vector with associative strengths or predictive values for each stim
+  # temp_param: temperature parameter, higher means more exploration
+  # the function returns a vector p with choice probabilities for each cue
+  exp(temp_param * alpha * abs(v)) / sum(exp(temp_param * alpha * abs(v)))
+}
+
+
+```
+
+
+```{r mode-function, include=FALSE, eval=FALSE}
+
+# function to calculate mode of a vector of numbers
+
+Mode = function(data.vec){
+    ta = table(data.vec)
+    tam = max(ta)
+    if (all(ta == tam))
+         mod = NA
+    else
+         if(is.numeric(data.vec))
+    mod = as.numeric(names(ta)[ta == tam])
+    else
+         mod = names(ta)[ta == tam]
+    return(mod)
+}
+
+```
+
+```{r processed_cue_function, include=FALSE, eval=F}
+
+# to choose with cue to process, we use the following function
+processed_cue = function(a, v, temp=30) {
+  # returns a vector with a 1 for the cue that is processed in the trial
+  rmultinom(1, 1, softmax(a, v, temp_param = temp))
+}
+
+# example
+# v <- c(.2,.3,.7)
+# a <- c(.4,.3,.2)
+# processed_cue(a,v)
+
+# Note: if the alpha for one of the cues is zero, it will never be sampled.
+# Perhaps it's best to make the design matrix have alphas and 0s instead of 1s and 0s.
+
+```
+
+```{r plot_functions, message=FALSE, warning=FALSE, include=FALSE}
+
+# default.colors <- c("#f8766D", "#00BA38", "#619CFF")
+
+make_line_plot <- function(cues, ylims = c(0, .6), title){
+  ggline(data=subset(v_long, cue %in% cues), x="trial", y="v_cue", add="mean", color="cue", size=1.05, ylab=title) + coord_cartesian(ylim=ylims)
+}
+
+make_bar_plot <- function(cues, ylims = c(0, .6), title="", ylab="") {
+  ggbarplot(data=subset(v_long, trial==max(v_long$trial) & cue %in% cues), x="cue", y="v_cue", add="mean", fill="cue", ylab=ylab, title=title, size=0.9, position=position_dodge(.8)) + coord_cartesian(ylim=ylims) 
+}
+
+# + scale_fill_manual(values=default.colors)
+```
+
+```{r calculate-proportion-of-participants, echo=FALSE, eval=FALSE, include=FALSE}
+
+# Calculate proportion of participants near B=8 points and near A=10 points of allergy.
+exp2_intra2_mean_ratings <- subset(exp2_mean_ratings, Group == "intra2" & Cue == "AB") %>% mutate(near.what.value = ifelse(Rating >= 7 & Rating < 9, "near8", ifelse(Rating >= 9 & Rating < 11, "near10", "out_of_range"))) 
+
+# check if N is OK (should be 35)
+n.subjects <- (exp2_intra2_mean_ratings$Participant %>% unique() %>% NROW())
+
+(exp2_intra2_mean_ratings %>% dplyr::group_by(near.what.value) %>% dplyr::count() %>% mutate(percent = n/n.subjects))
+
+# create df with summaries (mean and CIs) for each cue
+ratings.mean.ci.df <- Rmisc::summarySEwithin(subset(exp2, Group=="intra2"), measurevar = "Rating", withinvars = "Cue") %>% as.data.frame()
+# 
+(ratings.mean.ci.df %>% mutate(ci.low = Rating - ci, ci.high = Rating + ci) -> ratings.mean.ci.df) # create CIs
+
+# Calculate difference between AB intra2 in Exp2 and Exp3 (to show that summation was higher in Exp3, in accord with the simulations)
+
+(t.test(subset(exp2, Cue=="AB" & Group=="intra2")$Rating, subset(exp1, Cue=="AB" & Group=="intra2")$Rating, paired = FALSE))
+
+
+
+```
+
+```{r exp7-scores, echo=FALSE, eval=FALSE, include=FALSE}
+
+# create df with summaries (mean and CIs) for each cue
+exp7$Rating <- exp7$Score
+
+ratings.mean.ci.df.exp7.intra <- Rmisc::summarySEwithin(subset(exp7, Group=="intra"), measurevar = "Rating", withinvars = "Cue") %>% as.data.frame() %>% mutate(ci.low = Rating - ci, ci.high = Rating + ci) -> ratings.mean.ci.df.exp7.intra # create CIs
+
+ratings.mean.ci.df.exp7.extra1 <- Rmisc::summarySEwithin(subset(exp7, Group=="extra1"), measurevar = "Rating", withinvars = "Cue") %>% as.data.frame() %>% mutate(ci.low = Rating - ci, ci.high = Rating + ci) -> ratings.mean.ci.df.exp7.extra1 # create CIs
+
+ratings.mean.ci.df.exp7.extra2 <- Rmisc::summarySEwithin(subset(exp7, Group=="extra2"), measurevar = "Rating", withinvars = "Cue") %>% as.data.frame() %>% mutate(ci.low = Rating - ci, ci.high = Rating + ci) -> ratings.mean.ci.df.exp7.extra2 # create CIs
+
+# Calculate difference between AB intra2 in Exp2 and Exp3 (to show that summation was higher in Exp3, in accord with the simulations)
+
+# (t.test(subset(exp2, Cue=="AB" & Group=="intra2")$Rating, subset(exp1, Cue=="AB" & Group=="intra2")$Rating, paired = FALSE))
+
+
+# check if N is OK (should be 35)
+n.subject = function(df, group) {
+  # this function takes a dataframe and the name of a group and gives you the n of subjects
+n.subjects <- subset(df, Group==group) %>% dplyr::select(Participant) %>% unique() %>% NROW()
+}
+
+for (id_group in c("intra", "extra1", "extra2")){
+  n.subjects <-  n.subject(exp7, id_group) 
+  cat("N", id_group, ":", n.subjects, "\n")
+}
+
+
+# Calculate proportion of participants near B=8 points and near A=10 points of allergy.
+countNearValues = function(df, group){
+  n.subjects <- subset(df, Group==group) %>% 
+    dplyr::select(Participant) %>%
+    unique() %>%
+    NROW() 
+  
+  subset(df, Group == group & Cue == "AB") %>%
+    mutate(near.what.value = ifelse(Rating >= 9 & Rating < 11, "near10", ifelse(Rating >= 19 & Rating <21, "near20", "out_of_range"))) %>%
+    group_by(near.what.value) %>%
+    count() %>%
+    mutate(percent = n/n.subjects) # n is created by count() 
+}
+
+countNearValues(exp7, "extra2")
+
+```
+
+```{r parameters_simulations, echo=FALSE, include=FALSE, eval=F, cache=F}
+
+# initial value for v at the beginning of training
+initial_v <- .05
+
+# initial value for beta
+b <- .2
+
+summation_WR = function(){
+  # nCS <- nrow(design_mat)-1 # last row is lambda, so only nrow(design_mat)-1 CSs
+  v <- matrix(initial_v, nCS, ncol(design_mat)) # matrix with associative strengths
+  # start training
+  for (trial in 2:ncol(design_mat)){ # starts at trial==2 because it updates v from 2nd trial
+    for (cs in 1:(nrow(design_mat)-1)){ # -1 because the last row is lambda value for the trial
+      if (design_mat[cs, trial]==1){ # if the CS is active (or presented)
+        PE <- design_mat[nrow(design_mat), trial] - v[cs, trial-1] #sum(v[ ,trial-1]) # calculate pred error; nrow(design_mat) is pos of lambda value
+        v[cs, trial] <- v[cs, trial-1] + a[cs] * b * PE } # RW rule
+      else {
+        v[cs, trial] <- v[cs, trial-1] } # don't update if cue not present
+    }
+  }
+  return(v)
+}
+  
+
+```
+
+
+```{r summation, eval=F, echo=FALSE, cache=F, fig.height=6, fig.width=6, message=F}
+
+alphaB_vec <- c(.4, .5) # these are the alphas to change in each loop
+
+for (alphaB in alphaB_vec) { # run two different experiments, one with high and another with low alpha
+
+  a <- c(.4, alphaB, .4) # vector of alphas; last value is the common cue in a summation design
+  # b <- .4 # beta value for US
+  
+  nRepDesign <- 30 # this is the number of rep of the matrix design 
+  
+  n_simulations <- 80
+  
+  # create a matrix with 0s and 1s when a CS is presented
+  # 1st col is first trial, 2nd col is 2nd trial, etc
+  # nrow = number of cues-1
+  # ncol = nTrials
+  # row 4 = lambda values for each trial
+  #nRepDesign is how many times the design will be repeated
+  # For ex., cond inhibition is only two cols : c(1,0,1) and c(1,1,0)
+  # if nRepDesign = 3, you'll have 2x3=6 trials, which are then randomised
+  
+  trial_design_vec <- cbind(c(1, 0), c(0, 1)) # vectors for design matrix. Each vector is activation for A, B, etc. c(0,1,0) means B activated; 3rd column always zero because we are not using the unique cue in a summation design
+  
+  nCS <- nrow(trial_design_vec) # number of CSs, taken from trial_design_vec
+  
+  design_mat <- matrix(trial_design_vec, nrow=nCS, ncol=ncol(trial_design_vec)*nRepDesign)
+  
+  if (alphaB == .4) { # this is just a cheap way of changing the lambdas for the simulations that we need
+    lambdaB = 1
+  } else {
+    lambdaB = .95
+  }
+  
+  lambda_design_vec <- c(1, lambdaB) # 1 when reinforced, number of elements must be equal to number of trial types
+  lambda <- rep(lambda_design_vec, nRepDesign)
+  
+  #### create design matrix ####
+  
+  design_mat <- rbind(design_mat, lambda) # rbind this time; we are attaching it at the bottom of design_mat
+  
+  for (n in 1:n_simulations) { # repeat the experiments n_simulations times
+    design_mat <- design_mat[ , sample(ncol(design_mat))] #randomise the trial_types
+  
+    # run the simulation once for this repetition
+    v <- summation_WR()
+    #print(v)
+  
+    rownames(v) <- c("A", "B") # generate names for cues
+    v <- as.data.frame(t(v)) # transform into data frame with names in cols
+    #print(v)
+    
+    # In a simple summation design with single cues, we don't sample the common cues, so we add them at the end
+    v$X <- initial_v # create X for summation design because during training was not used
+    v$AB <- NA
+    # v$trial <- 1:nrow(v)
+    # v[nrow(v), ]$AB <- v[nrow(v), match(1, as.numeric(processed_cue(a, v[nrow(v), 1:(ncol(v)-1)])))] # finds the 1 for proccesed cue
+    #v[nrow(v),]$AB # since in summation design AB is only presented during the test, we pick the last V during training for one of them according to processed_cue()
+    for (trial in 1:nrow(v)){
+      v[trial, ]$AB <- v[trial, match(1, as.numeric(processed_cue(a, v[trial, 1:(ncol(v)-3)], temp = 30)))] # this replaces AB with the value of one of the cues, sampled by a softmax (ncol(v)-3 because it skips the "simulation" and "trial" cols)
+    }
+  
+    v$simulation <- n # counts n_simulations
+    v$trial <- 1:nrow(v)
+  
+    # now we create v_sim dataframe to save all simulations in one single dataframe
+    if (n == 1) { # first simulation saves only v; 2nd onwards binds it with the one from previous simulation
+      v_sim <- v
+    } else {
+      v_sim <- rbind(v_sim, v)
+    }
+  
+  }
+  
+  # Create plots
+  v_long <- melt(v_sim, id=c("trial", "simulation"), measured=c("A", "B", "X", "AB")) # change to long format for ploitting-
+  
+  v_long$cue <- factor(v_long$variable) # change name to variable 
+  v_long$v_cue <- v_long$value # change name to value
+  v_long <- v_long[ , c("cue", "v_cue", "trial", "simulation")] # keep only the new-named columnns
+  
+  # lplot_summation <- ggline(data=v_long, x="trial", y="v_cue", add="mean", color="cue", shape="cue", size=1.1, ylab="Responding", palette = "grey") + coord_cartesian(ylim=c(0, .7))
+  
+  cues_barplot <- c("A", "B", "AB") # which clues to plot
+  cues_lineplot <- c("A", "B")
+  
+  if (alphaB == alphaB_vec[1]) { # if equal to the low alpha value
+    lplot_summation_alpha_low <- make_line_plot(cues_lineplot, title = "") + theme(legend.position = "none")
+  
+    bplot_summation_alpha_low <- make_bar_plot(cues_barplot, ylab="v", title = "Simulation", ylims = c(0, .65)) + theme(legend.position = "none") } # this is rescorla coldwell's result
+  
+  else {
+    lplot_summation_alpha_high <- make_line_plot(cues_lineplot, title="") + theme(legend.position = "none")
+  
+    bplot_summation_alpha_high <- make_bar_plot(cues_barplot, ylab = "v", title="Simulation: Experiment 2", ylims = c(0, .65)) + theme(legend.position = "none") } # this is experiment 2
+
+}
+
+
+```
+
+```{r summation-diff-alpha-and-lambda, eval=F, echo=FALSE, cache=F, fig.height=6, fig.width=6, message=TRUE}
+
+# for (alphaA in c(.4, .8)) { # run two different experiments, one with high and another with low alpha
+
+  a <- c(.4, .5, .4) # vector of alphas; last value is the common cue in a summation design
+  # b <- .4 # beta value for US
+  
+  # nRepDesign <- 30 # this is the number of rep of the matrix design 
+  # #
+  # n_simulations <- 30
+  
+  # create a matrix with 0s and 1s when a CS is presented
+  # 1st col is first trial, 2nd col is 2nd trial, etc
+  # nrow = number of cues-1
+  # ncol = nTrials
+  # row 4 = lambda values for each trial
+  #nRepDesign is how many times the design will be repeated
+  # For ex., cond inhibition is only two cols : c(1,0,1) and c(1,1,0)
+  # if nRepDesign = 3, you'll have 2x3=6 trials, which are then randomised
+  
+  trial_design_vec <- cbind(c(1,0), c(0,1)) # vectors for design matrix. Each vector is activation for A, B, etc. c(0,1,0) means B activated; 3rd column always zero because we are not using the unique cue in a summation design
+  
+  nCS <- nrow(trial_design_vec) # number of CSs, taken from trial_design_vec
+  
+  design_mat <- matrix(trial_design_vec, nrow=nCS, ncol=ncol(trial_design_vec)*nRepDesign)
+  
+  lambda_design_vec <- c(.95, 1) # 1 when reinforced, number of elements must be equal to number of trial types
+  lambda <- rep(lambda_design_vec, nRepDesign)
+  
+  #### create design matrix ####
+  
+  design_mat <- rbind(design_mat, lambda) # rbind this time; we are attaching it at the bottom of design_mat
+  
+  for (n in 1:n_simulations) { # repeat the experiments n_simulations times
+    design_mat <- design_mat[ , sample(ncol(design_mat))] #randomise the trial_types
+  
+    # run the simulation once for this repetition
+    v <- summation_WR()
+    #print(v)
+  
+    rownames(v) <- c("A", "B") # generate names for cues
+    v <- as.data.frame(t(v)) # transform into data frame with names in cols
+    #print(v)
+    
+    # In a simple summation design with single cues, we don't sample the common cues, so we add them at the end
+    v$X <- initial_v # create X for summation design because during training was not used
+    v$AB <- NA
+    # v$trial <- 1:nrow(v)
+    # v[nrow(v), ]$AB <- v[nrow(v), match(1, as.numeric(processed_cue(a, v[nrow(v), 1:(ncol(v)-1)])))] # finds the 1 for proccesed cue
+    #v[nrow(v),]$AB # since in summation design AB is only presented during the test, we pick the last V during training for one of them according to processed_cue()
+    for (trial in 1:nrow(v)){
+      v[trial, ]$AB <- v[trial, match(1, as.numeric(processed_cue(a, v[trial, 1:(ncol(v)-3)], temp = 30)))] # this replaces AB with the value of one of the cues, sampled by a softmax (ncol(v)-3 because it skips the "simulation" and "trial" cols)
+    }
+  
+    v$simulation <- n # counts n_simulations
+    v$trial <- 1:nrow(v)
+  
+    # now we create v_sim dataframe to save all simulations in one single dataframe
+    if (n == 1) { # first simulation saves only v; 2nd onwards binds it with the one from previous simulation
+      v_sim <- v
+    } else {
+      v_sim <- rbind(v_sim, v)
+    }
+  
+  }
+  
+  # Create plots
+  v_long <- melt(v_sim, id=c("trial", "simulation"), measured=c("A", "B", "X", "AB")) # change to long format for ploitting
+  
+  v_long$cue <- factor(v_long$variable) # change name to variable 
+  v_long$v_cue <- v_long$value # change name to value
+  v_long <- v_long[ , c("cue", "v_cue", "trial", "simulation")] # keep only the new-named columnns
+  
+  # lplot_summation <- ggline(data=v_long, x="trial", y="v_cue", add="mean", color="cue", shape="cue", size=1.1, ylab="Responding", palette = "grey") + coord_cartesian(ylim=c(0, .7))
+  
+  cues_barplot <- c("A", "B", "AB") # which clues to plot
+  cues_lineplot <- c("A", "B")
+  
+
+    lplot_summation_alpha_high_lambda_low <- make_line_plot(cues_lineplot, title = "") + theme(legend.position = "none")
+  
+    bplot_summation_alpha_high_lambda_low <- make_bar_plot(cues_barplot, ylab = "", title="Simulation: Experiment 3", ylims = c(0, .65)) + theme(legend.position = "none") 
+
+
+
+
+```
+
+```{r plot-simple-summation, fig.height=4, fig.width=8, cache=F, fig.cap="Simulations of the EVS model for a summation design. Panel A shows the results of a summation experiment when the salience of A is equal to the salience of B. Panel B shows the simulations of Experiment 2, where the salience of B is higher than that of A, but B predicts a lower outcome value. Panel C shows the simulations of Experiment 3, where the salience of B was higher than that of A but the outcome value predicted by B was higher than the value predicted by A."}
+# 
+# ggarrange(lplot_summation_alpha_high, bplot_summation_alpha_high, lplot_summation_alpha_low, bplot_summation_alpha_low, ncol=2, nrow=2, labels = c("A", "B"), legend = "top", common.legend = TRUE)
+
+# ggarrange(bplot_summation_alpha_low, bplot_summation_alpha_high, bplot_summation_alpha_high_lambda_low, ncol=3, labels = c("A", "B", "C"))
+
+
+```
+
+```{r diff-summation-single-cues, echo=FALSE, eval=F, message=FALSE, cache=F, fig.cap="Simulations of the elemental visual search model for a summation design."}
+
+temp.this.exp <- 30
+
+a <- c(rep(.4, 3), rep(.4, 4)) #.c(.6, .6, .6, .6, .6, .6, .6) # vector of alphas; the last 4 are the common cues for each possible compound AB, BC, AC, ABC, denoted by X,Y,Z,V. During the test with ABC, the compound is represented as ABCXYZV.
+
+# b <- .2 # beta value for US
+# 
+# nRepDesign <- 30 # this is the number of rep of the matrix design. If two trial types, then then 2*nRepDesign=TotalNumberOfTrials
+# 
+# n_simulations <- 30 # number of subjects simulated
+
+trial_design_vec <- cbind(c(1, 0, 0, 0, 0, 0, 0), c(0, 1, 0, 0, 0, 0, 0), c(0, 0, 1, 0, 0, 0, 0)) # vectors for design matrix. Each vector is activation for A, B, etc. c(0,1,0) means B activated; 3rd column always zero because we are not using the unique cue in a summation design
+
+nCS <- nrow(trial_design_vec) # number of CSs, taken from trial_design_vec
+
+design_mat <- matrix(trial_design_vec, nrow=nCS, ncol=ncol(trial_design_vec)*nRepDesign)
+
+lambda_design_vec <- c(1, 1, 1) # 1 when reinforced, number of elements must be equal to number of trial types
+# lambda <- rep(lambda_design_vec, nRepDesign)
+
+#### create design matrix ####
+
+design_mat <- rbind(design_mat, rep(lambda_design_vec, nRepDesign)) # rbind this time; we are attaching it at the bottom of design_mat
+
+# Run simulations without calling a function
+
+for (n in 1:n_simulations) { # repeat the experiments n_simulations times
+  design_mat <- design_mat[ , sample(ncol(design_mat))] #randomise the trial_types
+
+  # run the simulation once for this repetition
+  v <- summation_WR()
+  #print(v)
+
+  rownames(v) <- c("A", "B", "C", "X", "Y", "Z", "V") # generate names for cues
+  v <- as.data.frame(t(v)) # transform into data frame with names in cols
+  #print(v)
+  
+  # In a simple summation design with single cues, we don't sample the common cues, so we add them at the end
+  v$X <- initial_v # create X for summation design because during training was not used
+  v$Y <- initial_v # same with the other non-target cues
+  v$Z <- initial_v 
+  v$V <- initial_v
+  v$ABC <- NA
+  
+  # since in summation design AB is only presented during the test, we pick the last V during training for one of them according to processed_cue()
+  for (trial in 1:nrow(v)){
+    v[trial, ]$ABC <- v[trial, match(1, as.numeric(processed_cue(a, v[trial, 1:(ncol(v)-3)], temp = temp.this.exp)))] # this replaces AB with the value of one of the cues, sampled by a softmax (ncol(v)-3 because it skips the "simulation" and "trial" cols)
+  }
+
+  v$simulation <- n # counts n_simulations
+  v$trial <- 1:nrow(v)
+
+  # now we create v_sim dataframe to save all simulations in one single dataframe
+  if (n == 1) { # first simulation saves only v; 2nd onwards binds it with the one from previous simulation
+    v_sim <- v
+  } else {
+    v_sim <- rbind(v_sim, v)
+  }
+
+}
+
+v_sim1 <- v_sim
+
+# Create plots
+v_long <- melt(v_sim, id=c("trial", "simulation"), measured=c("A", "B", "C", "X", "Y", "Z", "V", "ABC")) # change to long format for ploitting
+
+v_long$cue <- factor(v_long$variable) # change name to variable 
+v_long$v_cue <- v_long$value # change name to value
+v_long <- v_long[ , c("cue", "v_cue", "trial", "simulation")] # keep only the new-named columnns
+
+cues <- c("A", "B", "C", "ABC") # "X", "Y", "Z", "V", "ABC")
+
+lplot_summation_3_cues <- make_line_plot(cues, title ="") #+ theme(legend.position="none")
+
+# cues <- c("A", "B", "ABC") # plot only these cues in the barplot
+
+bplot_summation_3_cues <- make_bar_plot(cues, title="Simulations", ylab ="v", ylims = c(0, 1)) + theme(legend.position="none") + xlab("Train single cues")
+
+v_ABC_single <- mean(v_sim$ABC)
+
+
+```
+
+
+<!-- The following chunk is the first one using the processed_cue() function during training -->
+
+
+```{r summation-3-cues-compounds, echo=FALSE, eval=F, cache=F, fig.height=8, fig.width=8, message=FALSE, fig.cap="Simulations of the EVS model for a summation design with compound training."}
+
+# a <- c(.4, .4, .4, .4, .4, .4, .4) # vector of alphas; the last 4 are the common cues for each possible compound AB, BC, AC, ABC, denoted by X,Y,Z,V. During the test with ABC, the compound is represented as ABCXYZV.
+
+# b <- .4 # beta value for US
+
+# nRepDesign <- 20 # this is the number of rep of the matrix design. If two trial types, then then 2*nRepDesign=TotalNumberOfTrials
+
+# n_simulations <- 100 # number of subjects 
+
+for (n in 1:n_simulations) { # repeat the experiments n_simulations times
+  # The trial design is AB+/BC+/AC+. INcluding the common cues is ABX+/BCY+/ACZ+. We also include the last position for the common cue for ABC at test: we call it V; the representation fduring the test is ABCXZYV
+  trial_design_vec <- cbind(c(1, 1, 0, 1, 0, 0, 0), c(0, 1, 1, 0, 1, 0, 0), c(1, 0, 1, 0, 0, 1, 0)) # vectors for design matrix. Each vector is activation for A, B, etc. c(0,1,0) means B activated; 3rd column always zero because we are not using the unique cue in a summation design
+  
+  nCS <- nrow(trial_design_vec) # number of CSs, taken from trial_design_vec
+  
+  design_mat <- matrix(trial_design_vec, nrow=nCS, ncol=ncol(trial_design_vec)*nRepDesign)
+  
+  lambda_design_vec <- c(1, 1, 1) # 1 when reinforced, number of elements must be equal to number of trial types
+  # lambda <- rep(lambda_design_vec, nRepDesign)
+  
+  #### create design matrix 
+  
+  design_mat <- rbind(design_mat, rep(lambda_design_vec, nRepDesign)) # rbind this time; we are attaching it at the bottom of design_mat
+  
+  design_mat_this_simulation <- design_mat # use a copy of the original design matrix for each subject
+
+  design_mat_this_simulation <- design_mat_this_simulation[, sample(ncol(design_mat_this_simulation))] #randomise the trial_types
+  
+  v <- matrix(initial_v, nCS, ncol(design_mat_this_simulation)) # matrix with associative strengths
+    # start training
+    for (trial in 2:ncol(design_mat_this_simulation)){ # starts at trial==2 because it updates v from 2nd trial
+      active_positions <- which(design_mat_this_simulation[1:nCS, trial]==1) # positions of active cues (==1) in this trial
+      design_mat_this_simulation[1:nCS, trial] <- 0 # make all zeros for current trial
+      design_mat_this_simulation[active_positions, trial] <- processed_cue(a[active_positions], v[active_positions, trial-1], temp = temp.this.exp) # replace design mat for this trial with processed cue so that it only updates the processed one; trial-1 because that's the last v values; v for this trial hasn't been updated yet
+      for (cs in 1:(nrow(design_mat_this_simulation)-1)){ # -1 because the last row is lambda value for the trial
+        if (design_mat_this_simulation[cs, trial]==1){ # if the CS is active (or presented)
+          PE <- design_mat_this_simulation[nrow(design_mat), trial] - v[cs, trial-1] #- sum(v[ , trial-1]) # calculate pred error; nrow(design_mat) is pos of lambda value
+          v[cs, trial] <- v[cs, trial-1] + a[cs] * b * PE } # RW rule
+        else {
+          v[cs, trial] <- v[cs, trial-1] } # don't update if cue not present
+      }
+    }
+  
+  # finish this simulation
+  rownames(v) <- c("A", "B", "C", "X", "Y", "Z", "V") # generate names for cues
+  v <- as.data.frame(t(v)) # transform into data frame with names in cols
+
+  v$ABC <- NA
+
+  for (trial in 1:nrow(v)){
+    v[trial, ]$ABC <- v[trial, match(1, as.numeric(processed_cue(a, v[trial, 1:(ncol(v)-3)], temp = temp.this.exp)))] # this replaces AB with the value of one of the cues, sampled by a softmax (ncol(v)-3 because it skips the "simulation" and "trial" cols)
+  }
+
+  v$simulation <- n # counts n_simulations
+  v$trial <- 1:nrow(v)
+
+  # now we create v_sim dataframe to save all simulations in one single dataframe
+  if (n == 1) { # first simulation saves only v; 2nd onwards binds it with the one from previous simulation
+    v_sim <- v
+  } else {
+    v_sim <- rbind(v_sim, v)
+  }
+
+}
+
+# print(v_sim)
+v_sim2 <- v_sim
+
+# Create plots
+v_long <- melt(v_sim, id=c("trial", "simulation"), measured=c("A", "B", "X", "Y", "Z", "V", "ABC")) # change to long format for plotting
+
+ v_long$cue <- factor(v_long$variable) # change name to variable
+ v_long$v_cue <- v_long$value # change name to value
+ v_long <- v_long[ , c("cue", "v_cue", "trial", "simulation")] # keep only the new-named columnns
+# 
+# cues <- c("A", "B", "X", "Y", "Z", "V", "ABC")
+
+cues <- c("A", "B", "ABC") #"X", "Y", "Z", "V", "ABC")
+
+lplot_summation_3_cues_compounds <- make_line_plot(cues, title = "") #+ theme(legend.position="none")
+
+bplot_summation_3_cues_compounds <- make_bar_plot(cues, title="", ylab = "", ylims = c(0, 1)) + theme(legend.position="none") + xlab("Train compounds")
+
+
+# now I create a single df with the values of ABC at test for single and compound training, to plot them in the same way as the original plots (which show only ABC).
+
+v_ABC_compounds <- mean(v_sim$ABC)
+
+df_ABC_diff_summation <- data.frame(v=c(v_ABC_single, v_ABC_compounds), group=c("train \n single cues", "train \n compounds")) 
+
+df_ABC_diff_summation$group <- relevel(df_ABC_diff_summation$group, ref="train \n single cues") # relevel so that val appears first
+
+```
+
+<!-- ```{r line-plots-diff-summation, fig.height=4, fig.width=4, include=FALSE, eval=FALSE, cache=TRUE, fig.cap="Simulations of the EVS model for a differential summation design. Panel A shows the responding to A, B, C and ABC after reinforced training with A, B, C. Panel B shows the responding to A, B, C and ABC after reinforced training with AB, BC and AC."} -->
+
+<!-- ggarrange(lplot_summation_3_cues, lplot_summation_3_cues_compounds, ncol=2, labels=c("A", "B")) -->
+
+<!-- ``` -->
+
+
+```{r plots-diff_summation, eval=F, echo=FALSE, include=FALSE, message=FALSE, fig.cap=""}
+
+# Here we create the dataset for the original experiment and a plot that will be arranged with the simulations below
+
+Pearceetal1997 <- readr::read_csv("Pearceetal1997_diffSummation.csv", col_names = FALSE)
+names(Pearceetal1997) = c("cue", "Responding")
+Pearceetal1997$cue = factor(Pearceetal1997$cue, levels=c("Bar0","Bar1"), labels=c("train \n single cues", "train \n compounds"))
+
+bplot_Pearceetal1997_ori = ggbarplot(data=Pearceetal1997, x="cue", y="Responding", fill="#619CFF", xlab="", ylab="Responding to ABC", title="Data", size=1, position=position_dodge(.8)) + theme(legend.position = "none") + ylim(0,90) #+ theme(text = element_text(size=9)) # axis.text.x = element_text(angle=30, hjust=1))
+
+# x <- ggarrange(bplot_summation_3_cues, bplot_summation_3_cues_compounds)
+
+```
+
+```{r, fig.height=4, fig.width=4, echo=FALSE, include=FALSE, eval=FALSE}
+
+bplot_diff_summation_sim <- ggbarplot(df_ABC_diff_summation, x="group", y="v", fill = "#619CFF", size=1, title="Simulation", xlab="") + ylim(0,.9) #+ theme(text=element_text(size=9))
+  # ggarrange(bplot_Pearceetal1997_ori, bplot_summation_3_cues, bplot_summation_3_cues_compounds, ncol=3, labels=c("A","B","")) 
+
+```
+
+```{r final-plot-diff-summation, eval=F, include=F, fig.height=4, fig.width=8}
+
+plot_diff_summation <- ggarrange(bplot_Pearceetal1997_ori, bplot_diff_summation_sim, ncol=2, labels=c("",""))
+  
+```
+
+
+
+```{r PearceWilson-sims, eval=F, cache=F, fig.cap="", message=FALSE, include=F}
+
+temp.this.exp <- 30 # common to chunk below
+# a <- c(rep(alpha_unique_cues, n_repetitions), rep(alpha_common_cues, n_reps))
+a <- c(rep(.4, 2), rep(.4, 1)) # vector of alphas; A,B and X are the cues in the simple negative patterning problem
+
+# b <- .2 # beta value for US
+
+nRepDesign <- 30 # this is the number of rep of the matrix design. If two trial types, then then 2*nRepDesign=TotalNumberOfTrials
+
+n_simulations <- 80 # number of subjects; common to chunk below
+
+for (n in 1:n_simulations) { # repeat the experiments n_simulations times
+  # The trial design is AB+/BC+/AC+. Including the common cues is ABX+/BCY+/ACZ+. We also include the last position for the common cue for ABC at test: we call it V; the representation during the test is ABCXZYV
+  trial_design_vec <- cbind(c(1, 0, 0), c(1, 1, 1)) # vectors for design matrix. Each vector is activation for A, B, etc. c(0,1,0) means B activated; 3rd column always zero because we are not using the unique cue in a summation design
+  
+  nCS <- nrow(trial_design_vec) # number of CSs, taken from trial_design_vec
+  
+  design_mat <- matrix(trial_design_vec, nrow=nCS, ncol=ncol(trial_design_vec)*nRepDesign)
+  
+  lambda_design_vec <- c(1, 0) # 1 when reinforced, number of elements must be equal to number of trial types
+  # lambda <- rep(lambda_design_vec, nRepDesign)
+  
+  #### create design matrix ####
+  
+  design_mat <- rbind(design_mat, rep(lambda_design_vec, nRepDesign)) # rbind this time; we are attaching it at the bottom of design_mat
+  
+  design_mat_this_simulation <- design_mat # use a copy of the original design matrix for each subject
+
+  design_mat_this_simulation <- design_mat_this_simulation[ , sample(ncol(design_mat_this_simulation))] #randomise the trial_types
+  
+  # Create an additional design matrix for phase 2 and then cbind it with the original one after having randomised the presentation of trial types in the first phase
+  
+  trial_design_vec_phase2 <- c(0, 1, 0) # this is the B
+  
+  design_mat_phase2 <- matrix(trial_design_vec_phase2, nrow=nCS, ncol=2*nRepDesign) # 2x repetitions because it's only one column and the original design matrix has two: A+/AB-
+
+  lambda_design_vec_phase2 <- 1
+  
+  design_mat_phase2 <- rbind(design_mat_phase2, lambda_design_vec_phase2)
+  
+  design_mat_this_simulation <- cbind(design_mat_this_simulation, design_mat_phase2)
+  
+  v <- matrix(initial_v, nCS, ncol(design_mat_this_simulation)) # matrix with associative strengths
+    # start training
+    for (trial in 2:ncol(design_mat_this_simulation)){ # starts at trial==2 because it updates v from 2nd trial
+      active_positions <- which(design_mat_this_simulation[1:nCS, trial]==1) # positions of active cues (==1) in this trial
+      design_mat_this_simulation[1:nCS, trial] <- 0 # make all zeros for current trial
+      design_mat_this_simulation[active_positions, trial] <- processed_cue(a[active_positions], v[active_positions, trial-1], temp = temp.this.exp) # replace design mat for this trial with processed cue so that it only updates the processed one; trial-1 because that's the last v values; v for this trial hasn't been updated yet
+      for (cs in 1:(nrow(design_mat_this_simulation)-1)){ # -1 because the last row is lambda value for the trial
+        if (design_mat_this_simulation[cs, trial]==1){ # if the CS is active (or presented)
+          PE <- design_mat_this_simulation[nrow(design_mat), trial] - v[cs, trial-1] #- sum(v[, trial-1]) # calculate pred error; nrow(design_mat) is pos of lambda value
+          v[cs, trial] <- v[cs, trial-1] + a[cs] * b * PE } # RW rule
+        else {
+          v[cs, trial] <- v[cs, trial-1] } # don't update if cue not present
+      }
+    }
+  
+  # finish this simulation
+  rownames(v) <- c("A", "B", "X") # generate names for cues
+  v <- as.data.frame(t(v)) # transform into data frame with names in cols
+
+  v$AB <- NA
+
+  for (trial in 1:nrow(v)){
+    v[trial, ]$AB <- v[trial, match(1, as.numeric(processed_cue(a, v[trial, 1:(ncol(v)-3)], temp =temp.this.exp)))] # this replaces AB with the value of one of the cues, sampled by a softmax (ncol(v)-3 because it skips the "simulation" and "trial" cols)
+  }
+
+  v$simulation <- n # counts n_simulations
+  v$trial <- 1:nrow(v)
+
+  # now we create v_sim dataframe to save all simulations in one single dataframe
+  if (n == 1) { # first simulation saves only v; 2nd onwards binds it with the one from previous simulation
+    v_sim <- v
+  } else {
+    v_sim <- rbind(v_sim, v)
+  }
+
+}
+
+# print(v_sim)
+
+# Create plots
+v_long <- melt(v_sim, id=c("trial", "simulation"), measured=c("A", "B", "X", "AB")) # change to long format for plotting
+
+v_long$cue <- factor(v_long$variable) # change name to variable
+v_long$v_cue <- v_long$value # change name to value
+v_long <- v_long[ , c("cue", "v_cue", "trial", "simulation")] # keep only the new-named columnns
+
+cues <- c("B", "AB") # c("A", "B", "X", "AB")
+
+lplot_PearceWilson <- make_line_plot(cues, title="", ylims = c(0, 1)) #+ theme(legend.position="none")
+
+
+```
+
+```{r plot-PearceWilson, echo=FALSE, eval=FALSE, include=F, fig.height=4, fig.width=8, message=FALSE}
+
+# grab the original data
+PearceWilson1991 <- readr::read_csv("PearceWilson1991.csv", col_names = FALSE)
+
+names(PearceWilson1991) = c("Cue", "Responding")
+
+PearceWilson1991$Cue = factor(PearceWilson1991$Cue, levels=c("Bar0","Bar1"), labels=c("B", "AB"))
+
+bplot_PearceWilson_ori = ggbarplot(data=PearceWilson1991, x="Cue", y="Responding", fill="Cue", ylab="Responding", title="Data", position=position_dodge(.8), size=1) + theme(legend.position = "none") + ylim(0, 62)
+
+
+```
+
+```{r plot-PearceWilson-sim, echo=F, eval=F, include=F, fig.height=4, fig.width=4}
+
+# make the plot for the simulation of the data above (Pearce Wilson 1991)
+bplot_PearceWilson <- make_bar_plot(cues, title="Simulation", ylab="v", ylims = c(0, 1)) + theme(legend.position="none")
+
+# PearceWilsonPlots
+```
+
+```{r, echo=F, eval=F, include=F, fig.height=4, fig.width=8}
+
+PearceWilsonPlots <- ggarrange(bplot_PearceWilson_ori, bplot_PearceWilson)
+
+```
+
+```{r plots-summation, eval=F, echo=FALSE, include=FALSE, cache=TRUE, fig.height=6, fig.width=6, message=FALSE, fig.cap="Simulations of a EVS model for Experiment 3 of Pearce and Wilson (1991). The experiment comprises a first phase of the form A+/AB-, which turns B into a conditioned inhibitor. In the second phase, B is reinforced in isolation."}
+
+# grab the original data
+RescorlaColdwell1995 <- readr::read_csv("RescorlaColdwell1995.csv", col_names = FALSE)
+
+names(RescorlaColdwell1995) = c("cue", "Responding")
+
+RescorlaColdwell1995$cue = factor(RescorlaColdwell1995$cue, levels=c("Bar0","Bar1", "Bar2"), labels=c("A", "B", "AB"))
+
+bplot_RescorlaColdwell1995_ori = ggbarplot(data=RescorlaColdwell1995, x="cue", y="Responding", fill="cue", ylab="Responding", title="Rescorla & Coldwell, 1995", position=position_dodge(.8)) + theme(legend.position = "none")  + ylim(0, 160)
+
+plot_summation <- ggarrange(bplot_RescorlaColdwell1995_ori, bplot_summation_alpha_low, bplot_summation_alpha_high, bplot_summation_alpha_high_lambda_low, nrow=2, ncol=2, labels=c("a","","b","c"))
+
+# plot_summation
+
+```
+
+```{r negative-patterning, cache=F, eval=F, fig.cap="Simulations", fig.height=6, message=FALSE, include=F}
+
+temp.this.exp <- 5 # common to chunk below
+# a <- c(rep(alpha_unique_cues, n_repetitions), rep(alpha_common_cues, n_reps))
+a <- c(rep(.4, 2), rep(.4, 1)) # vector of alphas; A,B and X are the cues in the simple negative patterning problem
+
+# b <- .2 # beta value for US
+
+nRepDesign <- 30 # this is the number of rep of the matrix design. If two trial types, then then 2*nRepDesign=TotalNumberOfTrials
+
+n_simulations <- 80 # number of subjects; common to chunk below
+
+for (n in 1:n_simulations) { # repeat the experiments n_simulations times
+  # The trial design is AB+/BC+/AC+. INcluding the common cues is ABX+/BCY+/ACZ+. We also include the last position for the common cue for ABC at test: we call it V; the representation during the test is ABCXZYV
+  trial_design_vec <- cbind(c(1, 0, 0), c(1, 1, 1)) # vectors for design matrix. Each vector is activation for A, B, etc. c(0,1,0) means B activated; 3rd column always zero because we are not using the unique cue in a summation design
+  
+  nCS <- nrow(trial_design_vec) # number of CSs, taken from trial_design_vec
+  
+  design_mat <- matrix(trial_design_vec, nrow=nCS, ncol=ncol(trial_design_vec)*nRepDesign)
+  
+  lambda_design_vec <- c(1, 0) # 1 when reinforced, number of elements must be equal to number of trial types
+  # lambda <- rep(lambda_design_vec, nRepDesign)
+  
+  #### create design matrix ####
+  
+  design_mat <- rbind(design_mat, rep(lambda_design_vec, nRepDesign)) # rbind this time; we are attaching it at the bottom of design_mat
+  
+  design_mat_this_simulation <- design_mat # use a copy of the original design matrix for each subject
+
+  design_mat_this_simulation <- design_mat_this_simulation[ , sample(ncol(design_mat_this_simulation))] #randomise the trial_types
+  
+  v <- matrix(initial_v, nCS, ncol(design_mat_this_simulation)) # matrix with associative strengths
+    # start training
+    for (trial in 2:ncol(design_mat_this_simulation)){ # starts at trial==2 because it updates v from 2nd trial
+      active_positions <- which(design_mat_this_simulation[1:nCS, trial]==1) # positions of active cues (==1) in this trial
+      design_mat_this_simulation[1:nCS, trial] <- 0 # make all zeros for current trial
+      design_mat_this_simulation[active_positions, trial] <- processed_cue(a[active_positions], v[active_positions, trial-1], temp = temp.this.exp) # replace design mat for this trial with processed cue so that it only updates the processed one; trial-1 because that's the last v values; v for this trial hasn't been updated yet
+      for (cs in 1:(nrow(design_mat_this_simulation)-1)){ # -1 because the last row is lambda value for the trial
+        if (design_mat_this_simulation[cs, trial]==1){ # if the CS is active (or presented)
+          PE <- design_mat_this_simulation[nrow(design_mat), trial] - v[cs, trial-1] #sum(v[ ,trial-1]) # calculate pred error; nrow(design_mat) is pos of lambda value
+          v[cs, trial] <- v[cs, trial-1] + a[cs] * b * PE } # RW rule
+        else {
+          v[cs, trial] <- v[cs, trial-1] } # don't update if cue not present
+      }
+    }
+  
+  # finish this simulation
+  rownames(v) <- c("A", "B", "X") # generate names for cues
+  v <- as.data.frame(t(v)) # transform into data frame with names in cols
+
+  v$AB <- NA
+
+  for (trial in 1:nrow(v)){
+    v[trial, ]$AB <- v[trial, match(1, as.numeric(processed_cue(a, v[trial, 1:(ncol(v)-3)], temp =temp.this.exp)))] # this replaces AB with the value of one of the cues, sampled by a softmax (ncol(v)-3 because it skips the "simulation" and "trial" cols)
+  }
+
+  v$simulation <- n # counts n_simulations
+  v$trial <- 1:nrow(v)
+
+  # now we create v_sim dataframe to save all simulations in one single dataframe
+  if (n == 1) { # first simulation saves only v; 2nd onwards binds it with the one from previous simulation
+    v_sim <- v
+  } else {
+    v_sim <- rbind(v_sim, v)
+  }
+
+}
+
+# print(v_sim)
+
+# Create plots
+v_long <- melt(v_sim, id=c("trial", "simulation"), measured=c("A", "B", "X", "AB")) # change to long format for plotting
+
+v_long$cue <- factor(v_long$variable) # change name to variable
+v_long$v_cue <- v_long$value # change name to value
+v_long <- v_long[ , c("cue", "v_cue", "trial", "simulation")] # keep only the new-named columnns
+
+cues <- c("A", "AB") # c("A", "B", "X", "AB")
+
+lplot_neg_patterning <- make_line_plot(cues, title="", ylims = c(0, 1)) #+ theme(legend.position="none")
+
+bplot_neg_patterning <- make_bar_plot(cues, title="Simulation", ylab="v", ylims = c(0, .75)) + theme(legend.position="none") + xlab("Train A+, AB-") #+ scale_fill_manual(values = c("#f8766D", "#00BFC4"))
+
+# lplot_neg_patterning
+
+# ggarrange(lplot_neg_patterning, bplot_neg_patterning, ncol=2)
+
+```
+
+
+<!-- Negative patterning with added cues -->
+
+```{r negative-patterning-with-added-cues, eval=F, fig.cap="Simulations", message=FALSE, include=F}
+
+# This design is AC+, BC+, ABC-
+# a <- c(rep(alpha_unique_cues, number of reps), rep(alpha_common_cues, number_of_reps))
+
+a <- c(rep(.4, 3), rep(.4, 3), .7)# vector of alphas; the last 4 are the common cues for each possible compound AB, BC, AC, ABC, denoted by X,Y,Z,V. During the test with ABC, the compound is represented as ABCXYZV.
+
+# b <- .2 # beta value for US
+
+nRepDesign <- 30 # this is the number of rep of the matrix design. If two trial types, then then 2*nRepDesign=TotalNumberOfTrials
+
+# n_simulations <- 100 # number of subjects 
+
+for (n in 1:n_simulations) { # repeat the experiments n_simulations times
+  # The trial design is AB+/BC+/AC+. INcluding the common cues is ABX+/BCY+/ACZ+. We also include the last position for the common cue for ABC at test: we call it V; the representation fduring the test is ABCXZYV
+  trial_design_vec <- cbind(c(1, 1, 0, 1, 0, 0, 0), c(1, 0, 1, 0, 0, 1, 0), c(1, 1, 1, 1, 1, 1, 1)) # vectors for design matrix. Each vector is activation for A, B, etc. c(0,1,0) means B activated; 3rd column always zero because we are not using the unique cue in a summation design
+  
+  nCS <- nrow(trial_design_vec) # number of CSs, taken from trial_design_vec
+  
+  design_mat <- matrix(trial_design_vec, nrow=nCS, ncol=ncol(trial_design_vec)*nRepDesign)
+  
+  lambda_design_vec <- c(1, 1, 0) # 1 when reinforced, number of elements must be equal to number of trial types
+  # lambda <- rep(lambda_design_vec, nRepDesign)
+  
+  #### create design matrix ####
+  
+  design_mat <- rbind(design_mat, rep(lambda_design_vec, nRepDesign)) # rbind this time; we are attaching it at the bottom of design_mat
+  
+  design_mat_this_simulation <- design_mat # use a copy of the original design matrix for each subject
+
+  design_mat_this_simulation <- design_mat_this_simulation[ , sample(ncol(design_mat_this_simulation))] #randomise the trial_types
+  
+  v <- matrix(initial_v, nCS, ncol(design_mat_this_simulation)) # matrix with associative strengths
+    # start training
+    for (trial in 2:ncol(design_mat_this_simulation)){ # starts at trial==2 because it updates v from 2nd trial
+      active_positions <- which(design_mat_this_simulation[1:nCS, trial]==1) # positions of active cues (==1) in this trial
+      design_mat_this_simulation[1:nCS, trial] <- 0 # make all zeros for current trial
+      design_mat_this_simulation[active_positions, trial] <- processed_cue(a[active_positions], v[active_positions, trial-1], temp = temp.this.exp) # replace design mat for this trial with processed cue so that it only updates the processed one; trial-1 because that's the last v values; v for this trial hasn't been updated yet
+      for (cs in 1:(nrow(design_mat_this_simulation)-1)){ # -1 because the last row is lambda value for the trial
+        if (design_mat_this_simulation[cs, trial]==1){ # if the CS is active (or presented)
+          PE <- design_mat_this_simulation[nrow(design_mat), trial] - v[cs, trial-1] #- sum(v[ ,trial-1]) # calculate pred error; nrow(design_mat) is pos of lambda value
+          v[cs, trial] <- v[cs, trial-1] + a[cs] * b * PE } # RW rule
+        else {
+          v[cs, trial] <- v[cs, trial-1] } # don't update if cue not present
+      }
+    }
+  
+  # finish this simulation
+  rownames(v) <- c("A", "B", "C", "X", "Y", "Z", "V") # generate names for cues
+  v <- as.data.frame(t(v)) # transform into data frame with names in cols
+
+  v$ABC <- NA
+  v$AC <- NA
+  # v$BC <- NA
+
+  for (trial in 1:nrow(v)){
+    v[trial, ]$ABC <- v[trial, match(1, as.numeric(processed_cue(a, v[trial, 1:(ncol(v)-3)],temp = temp.this.exp)))] # choose from all cues
+    # v[trial, ]$BC <- v[trial, match(1, as.numeric(processed_cue(a[c(2,3,5)], v[trial, c(2,3,5)])))] # choose from B, C, Y
+    v[trial, ]$AC <- v[trial, match(1, as.numeric(processed_cue(a[c(1,3,6)], v[trial, c(1,3,6)], temp = temp.this.exp)))] # choose from A, C, ZS
+  }
+
+  v$simulation <- n # counts n_simulations
+  v$trial <- 1:nrow(v)
+
+  # now we create v_sim dataframe to save all simulations in one single dataframe
+  if (n == 1) { # first simulation saves only v; 2nd onwards binds it with the one from previous simulation
+    v_sim <- v
+  } else {
+    v_sim <- rbind(v_sim, v)
+  }
+
+}
+
+# print(v_sim)
+
+# Create plots
+v_long <- melt(v_sim, id=c("trial", "simulation"), measured=c("A", "B", "C", "AC", "X", "Y", "Z", "V", "ABC")) # change to long format for plotting
+
+v_long$cue <- factor(v_long$variable) # change name to variable
+v_long$v_cue <- v_long$value # change name to value
+v_long <- v_long[ , c("cue", "v_cue", "trial", "simulation")] # keep only the new-named columnns
+
+cues <- c("AC", "ABC") #, "B", "C", "AC", "ABC", "X", "Y", "Z", "V", "ABC")
+ 
+lplot_neg_patterning_compounds <- make_line_plot(cues, ylims = c(0, 1), title="") # + theme(legend.position="none")
+
+bplot_neg_patterning_compounds <- make_bar_plot(cues, ylims = c(0, .75), ylab="", title="") + theme(legend.position="none") +  scale_x_discrete(limits=c("AC", "ABC")) + xlab("Train AC+, ABC-") + scale_fill_manual(values = c("#00BFC4","#f8766D"))
+
+# ggarrange(lplot_neg_patterning_compounds, bplot_neg_patterning_compounds, ncol=2)
+# 
+# ggarrange(lplot_neg_patterning, lplot_neg_patterning_compounds, bplot_neg_patterning, bplot_neg_patterning_compounds, ncol=2)
+
+
+```
+
+```{r plots-sims-neg-patterning, eval=F, echo=FALSE, include=F, fig.height=6, message=FALSE, fig.cap="Simulations of a EVS model for a negative patterning task. Panel A shows the responding to A, B and AB after training with A+, B+, and AB-. Panel B shows the responding to A, B, C, and ABC after training with AC+, BC+, and ABC-."}
+
+library(readr)
+
+PearceRedhead1993 <- read_csv("PearceRedhead1993.csv", col_names = FALSE, col_types = cols(X1 = col_skip()))
+
+PearceRedhead1993$cue = c("A", "AB", "AC", "ABC")
+PearceRedhead1993$group = c("a", "a", "b", "b")
+
+names(PearceRedhead1993) = c("Responding","cue","group")
+# 
+
+# Pearceetal1997$cue = factor(Pearceetal1997$cue, levels=c("Bar0","Bar1"), labels=c("train \n single cues", "train \n compounds"))
+
+# generate plots from extracted dataset (original dataset)
+bplot_PearceRedhead_a = subset(PearceRedhead1993, group=="a") %>% ggbarplot(data=., x="cue", y="Responding", fill="cue", xlab="Train A+, AB-", ylab="Responding", title="Data", size=1) + theme(legend.position = "none") + ylim(c(0, 150)) #+ theme(text = element_text(size=9))
+
+bplot_PearceRedhead_b = subset(PearceRedhead1993, group=="b") %>% ggbarplot(data=., x="cue", y="Responding", fill="cue", xlab="Train AC+, ABC-", ylab="", title="", size=1) + theme(legend.position = "none") + ylim(c(0, 150)) #+ theme(text = element_text(size=10))
+
+# join two plots
+bplot_PearceRedhead1993 = ggarrange(bplot_PearceRedhead_a, bplot_PearceRedhead_b, labels=c("a", ""))
+#
+# now join two plots from simulations
+bplot_neg_patterning_sim <- ggarrange(bplot_neg_patterning, bplot_neg_patterning_compounds, labels=c("b", ""))
+
+# Save negative patterning plot in 2 columns
+
+# plot_neg_patterning
+
+```
+
+```{r, fig.height=4, fig.width=4, echo=F, eval=F, include=F}
+
+# create all plots in one figure for negative patterning
+plot_neg_patterning = ggarrange(bplot_PearceRedhead1993, bplot_neg_patterning_sim, nrow=2)
+
+plot_neg_patterning
+
+# print("jola")
+```
+
+
+
+```{r save-all-plots, echo=FALSE, include=FALSE, eval=FALSE}
+
+# Do ctrl+ENTER to save them separately
+ggsave(PearceWilsonPlots, filename = "figures/all_figs/PearceWilsonPlots.jpeg")
+
+# ggsave(bplot_PearceWilson, filename = "figures/all_figs/plotPearceWilson1991.jpeg")
+
+ggsave(plot_neg_patterning, filename = "figures/all_figs/plot_neg_patterning.jpeg")
+
+ggsave(plot_summation, filename = "figures/all_figs/plot_summation.jpeg")
+
+ggsave(plot_diff_summation, filename = "figures/all_figs/plot_diff_summation.jpeg")
+
+
+```
+
+
+# Introduction
+
+In the psychology of learning and decision-making one of the most important and studied topics is the process of generalisation. From calory intake to escaping from predators, generalizaton is critical for organisms, as it alows them to take previous instances of similar situations to inform their future behaviour and increase their chances of survival and reproduction [@Soto2010b]. Understanding the specific mechanisms that give rise to different generalisation strategies is therefore fundamental to understanding behaviour in general. 
+
+A particular type of generalisation problem that all animals face in natural environments is that of *compound generalisation*, which requires them to generalize knowledge acquired about certain combinations of stimuli to novel combinations of stimuli, which may include familiar stimuli and completely novel stimuli. In this regard, one paradigm that has been widely used in the animal literature due to its capacity to distinguish between different generalisation strategies is the summation procedure. In this procedure, two cues, say A and B, are separately paired with an outcome during a first stage of training and responding to a compound of the two stimuli, AB, is assessed in a final testing phase. A summation effect is obtained if subjects respond more to AB than to each of A or B alone. An analogous effect can be found in human causal learning when a compound is deemed to be more predictive of an outcome than each of A or B alone [@aydin1997some; @Kehoe1994a; @Perez2018b; @Soto2009; @Thein2008].
+
+To illustrate this procedure, imagine that a foraging animal finds and consumes a red apple, call it R, and gets sick afterwards. Now imagine that on a different occasion the animal gets sick by eating a green apple, G. The question at issue is the level of sickness that the animal will predict if consuming a green and a red apple at the same time, the RG compound.  Will the animal predict twice as much sickness when eating the two types of apple together? What would the animal predict if the apples were both red (RR compound) or both green (GG compound)? What if these were different types of food altogether, with very different sensory properties, such as an apple and a nut? 
+
+In the learning literature, the summation effect is anticipated by a class of Pavlovian conditioning models called *elemental* [@Rescorla1972]. These models assume that subjects represent A and B independently, and that the presence of the compound AB will simply make subjects sum their individual predictions, anticipating twice as much allergy after consuming two apples than after eating one apple alone. This additive generalisation strategy makes efficient use of the available evidence under the assumption that the two cues are independent causes of the sickness [@Perez2018b].
+
+A challenge to this elemental view comes from a different class of models called *configural* [@pearce1994similarity; @Pearce1987], which assume that subjects process and associate whole configurations with the outcomes that follow. Under a configural view, the total responding to a compound AB depends on the similarity between the training configurations A and B, and the testing configuration AB. In the basic formulation of configural theory proposed by Pearce, the prediction of outcome from AB is the average of the prediction from each of its components A and B. A foraging animal should thus predict the same level of sickness after eating the two apples together as when eating each one of them separately [-@pearce1994similarity; -@Pearce1987]. In such a case, summation should not be obtained.
+
+Empirically, the evidence on summation has been mixed, although one general observation is that summation is usually obtained when A and B come from different sensory modalities (e.g., auditory and visual) [@Kehoe1994a; @Thein2008] but not with stimuli from the same modality (e.g., two visual stimuli) [@aydin1995summation; @aydin1997some]. In humans, apart from modality, spatial and temporal contiguity can also impact on the level of summation observed [@Glautier2002; @Glautier2010]. Given this evidence, contemporary associative models of learning assume that the similarity between the components A and B plays a key role on whether the level of summation observed is closer to the one predicted by elemental or configural theories [@Melchers2008; @Perez2018b; @soto_explaining_2014; @Wagner2008; @Harris2006; @mclaren2002associative; @thorwart2012normalization]. A similar prediction is made by a recent normative model proposed by Soto, Gershman and Niv [-@soto_explaining_2014;  @soto2015some], which predicts that not only higher perceptual similarity, but also higher spatial or temporal contiguity should produce more configural processing and reduce the summation effect (see also Thorwart et al., 2012). 
+
+In a recent series of studies, however, we tested these predictions and found no evidence for similarity affecting summation in humans [@Perez2018b]. Instead, we found that subjects consistently summed the predictions of A and B when presented with the compound AB, disregarding similarity and spatial contiguity in making their predictions. We attributed these results to a causal inference process whereby participants represent independent stimuli as individual entities [@Cheng1997; @Cheng2012; @Mitchell2009]. Under these conditions, as long as participants are able to distinguish that the two previously trained cues A and B are present on the screen during the test with the compound AB, they will always encode them as independent causes and sum the predictions of the individual cues, and summation should always obtain.
+
+The fact that similarity plays a role in animal learning experiments but not in humans seem to suggest that the principles of similarity-based generalisation are different across species. However, our current understanding is that the principles of generalisation share much in common across species [@Shepard1987], probably because generalisation poses a similar problem to all species that are capable of learning [@Soto2010b]. The answer, perhaps, lies in searching for a different principle to unify the animal and human literatures.
+
+Animal studies offer a potential hypothesis for an unifying principle. There, evidence for configural processing, including the absence of a summation effect, has been obtained from auto-shaping experiments in pigeons using visual stimuli [@aydin1995summation; @aydin1997some]. In this type of procedure, hungry pigeons receive pairings of visual stimuli and food, which results on the animals approaching the stimuli and pecking at them. 
+
+Two notable features of \textcolor{black}{autoshaping experiments} may explain why summation is usually not obtained. First, the proximity of the pigeon to the screen in which stimuli are displayed may limit its ability to sample the large and complex stimuli usually displayed in compound generalisation experiments. In addition, just before the final ballistic movement that produces a peck, the peck’s target is centered on the area dorsalis of the pigeon's retina [@goodale_visually_1983; @martinoya_pigeons_1984], which is considered a “second fovea” due to its high density of cells. That is, pigeons specifically sample visual information from the pecked area, and they tend to peck on a circumscribed area of the screen displaying visual features predictive of reward [@dittrich_peck_2010; @soto_view-invariance_2012; @wasserman_differential_1974]. 
+
+These two factors suggest that pigeons may process only those visual features that they happened to be pecking during a particular trial rather than processing whole configurations. For example, in a summation test with the compound AB, the pigeon may be sampling only part of one stimulus, and predict the outcome level associated with that specific stimulus part. Under these circumstances, a reduction in the summation effect is explained not as a consequence of configural processing prompted \textcolor{black}{by the high similarity of unimodal stimuli,} but rather from *limited and inefficient sampling* of the stimulus compound.
+
+This interpretation makes the auto-shaping procedure seem very similar to an overt visual search task [@wolfe_visual_2018] in which the pigeon samples information from the display by pecking and foveating a circumscribed area until it encounters an area previously associated with reward, or *target*. At this point, the pigeon might continue to sample information from the target, and relevant information from the rest of the display is never sampled. In the search literature, this effect is known as *satisfaction of search* [@berbaum_satisfaction_1990], and it leads to a sub-optimal sampling of useful information in the stimulus, missing any other targets that may be present. This type of search, known as serial search, is inefficient [[@treisman_features_1988; @treisman_feature-integration_1980; @wolfe_visual_2018], taking longer as the display size increases and being prone to satisfaction of search. By contrast, people in human causal learning experiments see the stimuli from a distance and can process all the presented cues at the same time. When there is only a few of such cues that are easily distinguishable, they can be detected in parallel  [@treisman_preattentive_1985; @treisman_features_1988], which is an efficient sampling strategy [@wolfe_visual_2018]. In that case, all the relevant cues are sampled from the stimulus array [@Perez2018b; @Soto2009]. The lack of an effect of similarity in our previous studies could have been be due to the fact that some features of our stimuli (e.g., fixed spatial position of cues, lack of non-target cues) produced efficient sampling of information from the compound in a visual search process.
+
+<!-- parallel = efficient = summation -->
+<!-- serial = inefficient = no summation -->
+
+One further aspect of visual search that makes this hypothesis even more plausible is that similarity between different stimuli on the display is thought to be one of the critical factors determining if search is parallel or serial [@duncan_visual_1989], which parallels the argument of similarity affecting configural/elemental processing in the learning literature. In particular, increasing the similarity between the target and non-target cues makes search appear more serial, and thus less summation should be observed. \textcolor{black}{By contrast,} more summation should obtain if similarity is decreased so that search appears more parallel. 
+
+<!-- This argument is consistent with the effect of similarity on configural/elemental processing in the lerning literature. -->
+
+Our claim in this paper is that tasks and stimuli that promote a serial search strategy will produce behavioural results that mimic configural processing in key generalisation designs. Using the summation design, we present empirical evidence in line with this hypothesis from three experiments in humans. To further support our view, we present a computational reinforcement learning model which can capture both the present and previous results usually attributed to configural processing. This work leads to a more parsimonious explanation of the pattern of generalisation results obtained across species, and the unification of two seemingly unrelated areas of research in experimental psychology.
+
+<!-- Figure 1 -->
+![(a) Stimuli used in Experiment 1. Each stimulus was formed by a central point which extended in three different components. Target cues A and B were accompanied by two other non-target cues, X and Y. The compound AB was accompanied by one of the non-target stimuli X or Y. All compounds were presented in three different planar orientations, so that each component was equally likely to appear in one of three positions. (b) During 240 trials of training, the A, B, C and D cues were presented in each one of three different planar orientations and with either the X or Y non-target cues. Participants were asked to rate the level of allergy they thought would be produced by it, on a scale from 0 to 35. After an inter-stimulus interval, feedback was presented ('correct', if the prediction was correct; 'incorrect', if the prediciton was incorrect). During the test phase, each cue was presented two times (one time for each of the X and Y non-target cues), including trials with the compound AB. The predictions were assessed in the same way as in training, but no feedback was given during this stage.](figures/all_figs/Fig1.jpeg){width=100%}
+
+# Experiment 1
+
+In the three experiments reported here, participants were asked to play the role of an allergist whose goal was to judge the extent to which various drugs, represented by different shapes, caused allergy in a fictitious patient, Mr. X. We used a summation design with two stages (see Figure 1a). In the training stage, participants were presented with different cues and asked to predict the level of allergy produced by them.
+
+Our hypothesis in Experiment 1 was that the strong and consistent summation found in previous studies [@Perez2018b; @Soto2009] resulted from the use of cues that could be easily parsed and sampled by subjects, thanks to properties like their reliable spatial position and the absence of non-target cues. When such cues are easily distinguishable, they can be detected in parallel [@treisman_preattentive_1985; @treisman_features_1988]. By contrast, a task in which the target cues must be searched sequentially in the stimulus configuration is more akin to the situation of pigeon auto-shaping, and should lead to less summation if similarity between target and non-target cues is increased. 
+
+The goal of Experiment 1 was to test summation and the influence of similarity using such a task. To this end, a configuration of three cues was presented in all trials, so that each trial included one target and two non-target cues. As shown in Figure 1a, all stimuli consisted of three cues joined at a central point. In training trials, A and B were presented together with the non-target cues X and Y, and in testing trials both of them were presented with one of the non-target cues (either X or Y). \textcolor{black}{Two additional cues, C and D, were associated with no allergy and used as fillers to check which participants understood the contingencies}. 
+
+In the studies reported in Perez et al. (2018), A and B always had different spatial positions, which may have facilitated parsing them into independent cues. For this reason, we rotated the stimuli across trials, so that each cue was presented in each of the three possible spatial positions within the configuration. The same number of elements was therefore always presented and their spatial position was irrelevant. We expected that this would make our task more similar to a visual search task, which in turn should reduce the summation effect if similarity between target and non-target cues was increased [@duncan_visual_1989].
+
+\textcolor{black}{During the training phase, participants had to estimate the allergy level that would be produced by each cue using a scale of 0-35. Each one of the A. B, C and D cues was presented in each one of three planar orientations and two different positions for the non-target cues X and Y with respect to the target cue. Cues A and B produced 10 points of allergy out of 35, whereas cues C and D produced 0 points of allergy out of 35. There were 240 trials in total for this training phase. The test stage comprised two trials for each cue, including the compound AB. Participants were asked to enter the predictions for each cue, but no feedback was presented in this stage (see Figure 1b).}
+
+<!--COMMENT:
+Please check that all your figures and text refer to X and Y as "non-target" cues, in line with the search literature, rather than "contextual" cues.
+
+OP: Done.
+-->
+
+We manipulated the similarity of the three cues within a configuration in three different groups. Group *intra* included cues that varied only in shape (i.e., intra-dimensional differences, see Figure 1b). We expected very inefficient search with stimuli composed of the same features (points and lines) and differing only in spatial arrangement [@wolfe_visual_2018] and consequently low summation. For the two *extra* groups, cues varied both in shape and in color (i.e., extra-dimensional differences). In group *extra1*, A and B had different color (black vs. gray), but the colors were shared with the non-target cues X and Y (one of them black and the other gray, see top-left stimulus in Figure 1b). This means that although A and B can be easily distinguished, they are not easily distinguishable from the non-target cues. This high similarity between target and non-target cues should produce inefficient search. By contrast, similarity between target cues is less relevant [@duncan_visual_1989]. Thus, from visual search approach we would expect again inefficient sampling and low to no summation effect in group *extra1*. Finally, in group *extra2*, A and B had different color (black vs. gray), and they also differed in color with the non-target cues X and Y (light gray with black contours, see Figure 1b). In this case, we anticipated efficient sampling of all cues and a stronger summation effect.
+
+<!-- Figure 2 -->
+![**Design and results of Experiment 1**. (a) Letters denote cues, represented by different chemical shapes that can cause different levels of allergy to a fictitious patient. Each cue is represented by a capital letter. Cues A and B were the target cues, whereas X and Y were non-target cues. Cues C and D were fillers included to test if participants learnt during the training phase. In Experiment 1, all cues were followed (+) or not followed (-) by the same level of allergy (10 points of allergy out of a total of 35). (b) Average ratings given to each cue during the test. Individual ratings for each test trial are shown in dots). ](figures/all_figs/all_figs1.001.jpeg){width=100%}
+
+The comparison between groups *extra1* and *extra2* is important to evaluate the mechanism underlying a potential effect of similarity on summation. As mentioned above, contemporary learning models [@Soto2014b; @Wagner2008; @Harris2006; @mclaren2002associative; @thorwart2012normalization] assume that the key variable controlling summation is the similarity between A and B. In group *extra1*, these two cues were as dissimilar as in group *extra2*. If the effect of cue similarity acted through the mechanisms proposed by these learning models, then we should observe a similar summation effect in groups *extra1* and *extra2*. If, by contrast, the effect of cue similarity acts through a visual search mechanism, the similarity between the targets A and B and the non-targets X and Y is also important [@duncan_visual_1989]. More specifically, during test with the compounds ABX and ABY in group *extra1*, one of the target cues shares color with the non-target cue X or Y, which would make the other target cue "pop-out" from the compound [@treisman_preattentive_1985; @treisman_features_1988]. Once the "popped-out" cue is sampled, the search process ends and the participant reports the value of this sampled cue. In this case, we should observe no summation effect in both groups *extra1* and *intra*.
+
+<!-- (B) In Experiment 2, these cues were followed by different levels of allergy, which represented by the numbers shown next to each of them. The only difference between Experiments 2 and 3 was the assignment of allergy levels to cues A (AXY) and B (BXY) in group *intra2*: in Experiment 3 the outcomes of A and B were swapped so that they predicted 8 and 10 points of allergy, respectively. -->
+
+## Method
+
+## Participants
+86 undergraduate students from Florida International University participated in Experiment 1. Participants did not have previous experience with the experimental procedure and were tested simultaneously and in the same room. The Institutional Review Board of Florida International University approved this study (IRB-15-0460), and written informed consent was obtained from all participants. Participants were randomly assigned to one of three groups: *intra* $(n_{intra}=27)$, *extra1* $(n_{extra1}=28)$ and *extra2* $(n_{extra2}=31)$. The final number of participants in Experiment 1 was $n_{intra}=18$, $n_{extra1}=13$, $n_{extra2}=27$.
+
+## Materials
+Participants were tested in Windows (c) computers running Psychopy [@peirce2007psychopy] 1.75. Responses were recorded from standard PC keyboards.
+
+## Procedure
+Participants were presented with a task in which they were asked to play the role of an allergist that had to predict the levels of allergy caused by different drugs in a hypothetical patient, Mr. X (see Figure 1b) [@Soto2009; @Perez2018b]. During training, one or two drugs were presented as different abstract shapes (see Figure 1), and participants were required to give an assessment of the level of allergy that each drug would cause in Mr. X in a scale of 0 to 35. Two trials per each cue were presented during the testing stage.
+
+Groups differed in the similarity between cues in the display (see Figure 1a). Each stimulus was created from three different cues that "branched out" from a central point. Among these branches, only one of them represented the target cue associated with either allergy or no allergy during training. The other two branches were non-target cues that could not predict the presence or absence of allergy. During the test, the compound AB was comprised by two target branches together with an additional non-target cue. In group *intra*, all these "branches" were of the same color (black), but differed in shape. In group *extra1*, A and B differed in color (grey and black), but they shared color with the non-target cues (X and Y, one grey and one black). In group *extra2*, the target cues were the same as in group *extra1*, but now the background stimuli had a distinctive color as well. In all groups, A and B, which predicted allergy, shared color with cues C and D, which predicted no allergy. Thus, all participants, regardless of group, had to attend to shape. Color, on the other hand, was irrelevant to solve the discrimination.
+
+## Results and discussion
+
+<!-- ### Statistical analyses -->
+Statistical analyses were performed using the R programming language [Version 3.4.3; @R-base] under RStudio [@RStudioTeam2015], using the packages *BayesFactor* [Version 0.9.12.2; @R-BayesFactor], *bootES* [Version 1.2; @R-bootES], *dplyr* [Version 0.7.4; @R-dplyr], *ggplot2* [Version 2.2.1; @R-ggplot2], *ggpubr* [Version 0.1.6; @R-ggpubr] and *lme4* [Version 1.1.15; @R-lme4]. For all the pre-planned comparisons we calculated a Welsh *t*-test and included Cohen's D, along with a 95% confidence interval on this estimate, as a measure of effect size. When reporting interactions between factors, we computed  $\eta^2$ and a 90% confidence interval on this estimate. The reliability of the results was contrasted against the usual criterion of $\alpha=.05$. All scripts and materials for this paper can be found at www.github.com/omadav/seq_search
+
+The results of Experiment 1 are shown in Figure 2B. To analyze these data, we ran a 2(group) x 3(cue) mixed ANOVA with group as between-subject and cue as within-subject factors. We found a significant main effect of cue $(F(2, 110) = 16.54, p<.01)$ and group $(F(2, 55) = 3.79, p=.03)$. More importantly, we found a significant difference in the summation effect between the groups $(F(4, 110) = 4.00, p<.01, \eta^2=.13, 90\% CI [.02, .20])$. Consistent with a visual search approach, the significance of this interaction effect was due to a difference in scores for the compound in groups *intra* and *extra2* $(t(177.48)=4.54, p<.001, D=0.71, 95\% \:CI [0.06, 1.36])$. 
+
+<!-- Inspection of the plots suggest that individual scores to the compound follow a bi-modal distribution in all groups, with the majority of participants scoring the compound AB as giving the same score as either of the components A or B. Indeed, in group *intra*, the mean rating given to AB did not differ from 10 ($mean=11.00, 95\%\:CI\:[9.78,12.22]$) and 89% of participants scored AB between 9 and 11 points of allergy. This was also the case for group *extra1* ($mean=10.96,95\%\:CI[9.55,12.38]$). In this group, 77% of participants scored AB between 9 and 11 points of allergy. Furthermore, a significant proportion of participants (15%) scored AB between 19 and 21 points of allergy, but only 8% scored AB outside these two ranges. More importantly, the mode was 10 points of allergy in both *intra* and *extra1* groups. The data also revealed that the scores in group *extra2* followed a similar pattern, with more than half of the participants (52%) scoring AB between 9 and 11 points of allergy. In contrast with the other two groups, however, 26% of participants gave a score higher than 21 to AB, indicating that the higher summation observed in this group was driven by a proportion of participants scoring AB higher than the linear sum of the components A and B. In sum, these data suggest that the summation effect was determined by three distinguishable sets of participants: the majority, who scored the compound as near the scores predicted by A or B, and the rest of participants, who scored the compound outside of those two ranges of scores.   -->
+
+<!--COMMENT:
+Not sure whether the description of individual results adds much to the paper. Adding stuff usually confuses reviewers and makes them get cranky. The result: rejected from fancy journal because the main message is not clear, nice and tidy. Maybe move it to a supplementary material?
+-->
+
+The results of this experiment agree with our hypothesis that stimulus similarity affects the summation effect via visual search strategies. First, unlike the results of our previous studies [@Perez2018b; @Soto2009], we find for the first time that humans can show little to no summation if the right conditions are in place. This was the case for people in group *intra*, which we hypothesize is due to inefficient visual search and sub-optimal sampling of information from the display. Second, we found an effect of similarity on the summation effect, but, as can be expected from the visual search literature [@duncan_visual_1989], the main driver of this effect was similarity between targets and non-targets, rather than the similarity between the two targets A and B - as would be anticipated by contemporary learning models [@Soto2014b; @Wagner2008; @Harris2006; @mclaren2002associative; @thorwart2012normalization]. 
+
+# Experiment 2
+
+We have hypothesized that the data of group *intra* from Experiment 1 can be explained by participants deploying a visual search strategy similar to the strategy that we assume pigeons may be deploy during auto-shaping experiments. That is, when presented with the compound AB, subjects search for a "familiar" cue (either A or B) and report the outcome associated with that cue only. To test this hypothesis further, in Experiment 2 we used the same stimuli as group *intra* of Experiment 1, but assigned different outcome values (i.e., different allergy magnitudes) to cues A and B in different groups (see Figure 3a). Group *intra* was a replication of the same group from the previous experiment in which the outcome associated to both A and B was 10 points of allergy. Group  *intra2*, by contrast, involved two different outcome values: 10 points of allergy for cue A and 8 points of allergy for cue B. As in the previous experiment, we expected participants to score the compound AB in group *intra* as producing 10 points of allergy, so that no summation should be observed in this group. By contrast, to the extent that our stimulus manipulation prompts a serial visual search strategy, participants in group *intra2* should score the compound AB as producing either 8 or 10 points of allergy, indicating that they have responded in accord with the value of only one of the two single components. We also expected a null, or very weak summation effect for group *intra2* under these conditions. 
+
+An additional reason to use this design is that, according to some learning models, discrimination training with A and B having different outcome values should lead to learning to differentiate these two highly-similar cues [@Soto2014b]. Since the elements are perceived as dissimilar by virtue of being associated with different consequences, agents should process them independently, predicting $8+10=18$ points of allergy to the compound AB. In the associative learning literature, this effect is known as acquired distinctiveness (for a review, see @honey2010acquired). Therefore, the present experiment allows us to compare the predictions of a traditional associative analysis of the summation effect against those of the visual search analysis offered here.
+
+<!-- Figure 3 -->
+![**Design and results of Experiments 2 and 3**. (a) In Experiment 2, cues were followed by different levels of allergy, which are represented by the numbers shown next to each of them. The only difference between Experiments 2 and 3 was the assignment of allergy levels to cues A (AXY) and B (BXY) in group *intra2*: in Experiment 3 the outcomes of A and B were swapped so that they predicted 8 and 10 points of allergy, respectively. (b) Average ratings given to each cue during the test. Individual ratings for each test trial are shown in dots.](figures/all_figs/all_figs1.002.jpeg){width=100%}
+
+## Method 
+
+## Participants
+75 undergraduate students from Florida International University were randomly assigned to one of two groups ($n_{intra} = 40, n_{intra2} = 35$) and were compensated with course credit for their participation. The final number of participants per group was therefore $n_{intra}=40$, $n_{intra2}=33$.
+
+## Materials
+Participants were tested as described for group *intra* of Experiment 1 using Windows (c) computers running Psychopy [@peirce2007psychopy] 1.82.4.
+
+## Procedure
+The procedure was the same as described for group *intra* of Experiment 1, with only one exception: In group *intra2*, stimulus B was associated with 8 points of allergy during training (see Figure 4).
+
+## Results and discussion
+Figure 3b presents the results of Experiment 2. As expected for group *intra*, participants scores for A, B and AB did not differ $(F(2,77)=1.48, p=.24)$, replicating the absence of a summation effect found in Experiment 1. By contrast, we found a significant difference between these cues in group *intra2* ($F(4,76)=529.24, p<.0001$). More importantly, group *intra2* scored the compound AB as giving around 10 points of allergy, and this value did not differ from the value assigned to A $(t(32) = -0.09, p = .92, D: -0.07 \: 95\% CI [-0.38, 0.52], BF_{01}=5.35)$. 
+
+Note that even though the average rating for AB in group *intra2* was 10 points of allergy ($95\% \:CI \:[9.19, 10.48]$) the mode of scores was 8, and most participants in this group predicted that the compound would cause near 8 points of allergy---the level caused by B during training. In fact, 43% (15 subjects) gave scores to AB between 7 and 9 points of allergy, while only 17% (6 subjects) scored AB between 9 and 11 points. The rest of participants gave scores higher than 11 points to the compound, and only one participant showed full summation (18 points of allergy). 
+
+While these data are in agreement with our visual search hypothesis, in that the score given to AB was similar to that of cue B, they do not allow us to completely rule out configural processing, as a high proportion of participants scored the compound AB between 8 and 10 points, which is the "average" effect that configural models of learning would predict [@Pearce1987; @pearce1994similarity]. Experiment 3 was designed to rule out this explanation. 
+
+# Experiment 3
+
+The aim of Experiment 3 was to further test the visual search hypothesis using a design that would allow us to rule out configural processing as an explanation for lack of summation in group *intra*. Having observed that the weak summation obtained in Experiment 2 was due to the majority of participants choosing the value predicted by B to make their predictions for the compound AB, a question arises as to why this might have been the case. A natural possibility is that stimulus B was somehow more salient than stimulus A. If that was the case, then B would attract more attention during the test phase and should, as a consequence, be sampled more than the other cues forming the compound. 
+One way of testing for this possibility is keeping everything as in Experiment 2, but swapping the outcome values produced by the components A and B in group *intra2* so that A now predicts 8 points of allergy while B predicts 10. If stimulus B is truly more salient and attracting participants' attention during a search process, the majority of participants should give a higher rating to the compound AB (closer to 10 rather than 8) in response to the compound presentation. This would indicate that the properties of B were somehow more salient that those of A. Configural processing, by contrast, predicts that responding should be the same as in the previous experiment; that is, an averaging effect is anticipated, with a value between 8 and 10 points for the compound AB. 
+
+## Method 
+
+## Participants
+80 undergraduate students from Florida International University were randomly assigned to one of two groups ($n_{intra} = 42, n_{intra2} = 38$) and were tested under the same conditions of Experiment 2. Twenty six participants failed to meet the inclusion criteria and were discarded from the statistical analysis. The final number of participants per group was $n_{intra}=22$, $n_{intra2}=32$.
+
+## Materials
+Participants were tested in the same way as in Experiment 2.
+
+## Procedure
+The procedure was the same as in Experiment 2. Only the outcomes of A and B were interchanged in group *intra2*. The outcome assigned to A was 10 while a value of 8 was assigned to B. 
+
+## Results and discussion
+The results of Experiment 3 are shown in Figure 3c. As expected, we found no difference between the ratings to A, B and AB in group *intra*, $(F(1,42)=1.41, p=.26)$, replicating the lack of summation in group *intra* of Experiment 2. In group *intra2*, participants rated AB as producing near 11 points of allergy (mean=$11.69, 95\% \:CI[10.39,12,99]$), a value higher than the score to AB in Experiment 2 ($t(62.13)=2.30,p=.03$). However, the mode of scores was again equal to the outcome predicted by B (10 points of allergy). Moreover, the distribution of scores showed that the majority of participants (15 participants, 66% of the sample) scored the compound AB as producing between 9 and 11 points of allergy while only 2 participants (5% of the sample) scored the compound as producing between 7 and 9 points of allergy. This change in the distribution of scores from Experiment 2 to Experiment 3 confirms our hypothesis that the compound AB is rated as equal to the outcome predicted by B due to this cue having a higher salience. In contrast, configural processing cannot explain the change in the distribution of scores in the present experiment; in particular, configural theory cannot account for the fact that the mode of scores to AB tracks the outcome value assigned to B.
+
+Taken together, the three studies reported here provide empirical evidence for the hypothesis that inefficient visual search strategies mimic configural processing in the summation design. Although we have presented this evidence using human causal learning experiments, we believe that a similar process of serial search might underlie many results from the animal learning literature which are usually interpreted as arising from configural stimulus processing. In the next section we formalize this hypothesis in a reinforcement learning model and show through simulations how many patterns of results taken as evidence for configural processing can be captured by this new elemental visual search approach.
+
+<!-- Figure 4 -->
+![**An elemental visual search model.** On each trial where the agent is presented with  a compound of cues that predict an outcome, the actor samples one of the cues according to their current value and salience. In this example, the compound  AB is presented together with the unique cue X. For illustrative purposes, cue A has been sampled in this trial. Once the actor has sampled the cue, the critic updates the value according to a summed prediction error rule. Only the value of the sampled cue A is updated for the following trial.  ](figures/all_figs/fig_model.jpeg){width=100%} 
+
+# An elemental visual search model 
+
+Having established an elemental-type of representation with a visual search process as the best interpretation for our data, we now set out to formalize a computational model based on this idea. This model, which we call elemental-visual-search (EVS) model, can capture both the present and previous data from the learning literature, and shows how two different areas of research can be unified in a single framework to explain not only the data from summation designs but also from previous experiments on generalisation which are usually interpreted in favor of a configural-type of representation. 
+
+The model proposed here is related to the actor-critic reinforcement learning model [@Maia2010; @ODoherty2004]. Our model assumes a *critic* that learns according to a prediction-error algorithm, where the predictive value or *associative strength* of stimulus $i$ in trial $n$ , $v_{i}^{n}$, is updated in accord with \autoref{eq:RW} 
+
+\begin{equation}
+v_{i}^{n+1} = v_{i}^{n}+\alpha_{i}\beta(\lambda^{n} - v_{i}^{n})
+\label{eq:RW}
+\end{equation}
+
+, where $\alpha$ and $\beta$ are learning rate parameters $(\alpha \in [0,1], \beta \in [0,1])$ which represent how much the subject updates the value of cue $i$ in trial $n$ and $\lambda^{n}$ is an indicator function that takes the value one if a reward is presented in trial $n$ and zero if the reward is not presented $(\lambda \in \big\{0,1\big\})$. This algorithm assumes that the change in the associative or predictive value of stimulus $i$ is determined by the difference between the observed outcome and the current outcome expected from that stimulus.
+
+The next step is formulating the type of elemental representation that is brought about when compound of stimuli are presented to the agent. Assuming that the actual stimuli presented by the experimenter are the only cues represented by the agent, and that compounds are simply comprised of the same components is problematic, as such a model cannot account for the fact that animals learn non-linear discriminations in which elements and compounds are differentially rewarded. For this reason, we follow a previous model offered by Wagner and Rescorla [-@wagner1972inhibition]. Under this model, any component can activate its own elemental representation and acquire its own predictive value in accord with \autoref{eq:RW}, but the modification concerns how the agent represents cues in isolation and in compound. When a stimulus is presented in compound with other stimulus, this model assumes that an additional element enters into an association with the outcome, and that this *unique-cue* element follows the same learning algorithm as in \autoref{eq:RW}.
+
+Three important aspects of this unique cue are worth noting. First, the addition of a cue representing the compound does not imply that subjects process stimuli in a configural manner. The key property of configural processing is whether or not the representation of a given cue, like A, is "context-specific" [@Wagner2008], changing when A is presented alone versus when it is presented in compound with other stimuli. This is not the case for the Wagner-Rescorla model. In a summation design, A and B are still represented and processed elemntally, and a summation effect is still predicted by the model. 
+
+Second, the unique cue is usually interpreted as an internal representation of a compound. However, this interpretation is not necessary in the present application. As long as visual cues are presented in close proximity during compound trials (i.e., either overlapping or close to one another), it is possible for the subject to sample visual information in some areas of the display that are unique to compound trials (e.g., line intersections), which makes the compound trial different to a single cue trial. 
+
+Third, the unique cue is not necessary to explain results from simple summation experiments, like those presented in this paper. This aspect of the model is only important for the explanation of more complex designs, like the non-linear discriminations just mentioned. To illustrate this point, take one of the cardinal results suggesting a configural type of processing, the negative patterning design [@Myers2001]. Under this design, each component A and B is rewarded in isolation, but the compound AB is not (A+,B+,AB-). Given the above equations, it is relatively clear that an agent should never be able to solve this problem under an elemental-type of representation; that is, it should never learn to respond less to AB than to each of A or B alone. Given the assumption that predictions are summed linearly ($v_{Total}=v_{AB}=v_{A}+v_{B}$), the presentation of AB should always produce a summation effect. And yet animals are able to solve this problem and respond less to AB than to either of A and B (see also @saavedra1975pavlovian). However, the assumption of an additional unique cue is able to correctly predict these data. Assume, for example, that a unique cue X is active whenever the compound AB is presented, but inactive when A and B are presented in isolation. This is equivalent to A+, B+ and ABX- training, which, according to the Wagner and Rescorla model, implies that X will acquire negative predictive value. If the salience of X is high enough so as to counteract the positive predictions of A and B together, the discrimination is readily solved. 
+
+<!-- To make the terminology consistent with the visual search approach taken here, in what follows, we call this configural element as *non-target* element. -->
+
+To model our agent's visual search process, in addition to the critic learning the value of a cue according to \autoref{eq:RW} we assume an additional system, the actor, which searches in the stimulus array for a single stimulus to process. We model this actor through sampling from a multinomial distribution with parameter $\textbf{p}=[p_{1},p_{2},...,p_{k}]$ where $k$ is the number of stimuli presented in a given training or testing trial. In line with the visual search literature where both higher salience $(\alpha)$ [@parkhurst2002modeling] and higher predictive value $(v)$ [@anderson_value-driven_2011] increase the probability of a stimulus capturing attention, we assume that the probability of stimulus $i$ being processed is given by a softmax function incorporating both of these factors [@sutton1998reinforcement]:
+
+\begin{equation}
+\label{eq:softmax}
+p_{i}=\frac{\exp\left(\eta\alpha_{i}\left|v_{i}\right|\right)}{\underset{j}{\sum}\exp\left(\eta\alpha_{j}\left|v_{j}\right|\right)}
+\end{equation}
+
+, where $\eta$ is a decisiveness or *temperature* parameter that determines the extent to which the actor is biased to sample cues with low salience or predictive value ($j=[1,2,...,i,...k]$).  We use the absolute value of $v$, since cues with high inhibitory strength (negative $v$) should command more attention than other cues in a given array [@parkhurst2002modeling]. 
+
+To illustrate how this model operates, see the schematic representation of the model in Figure 4. In this example, we assume that the compound AB is being presented to the subject. In this case, the agent represents an additional unique cue X for this particular combination of elements. Once the actor samples cue A (shown in red), its value is then updated by the critic according to the difference between the current value or prediction ($v_{i}$) and the outcome observed ($\lambda$) in that trial.
+
+For all the simulations in this paper, we assume that the salience of the unique cues is equal to the salience of the target cues, that is, $\alpha_{target}=\alpha_{nonTarget}$, and that the order of presentations of different trial types in an experiment is random. The former assumption---that the salience of the cues presented and the unique cues represented by the subject in compound trials are equal---is an assumption generally held by Pearce [-@pearce1994similarity; -@Pearce2002] in his modelling of configural theory and is the one that, unless otherwise noted, we follow in all the subsequent simulations in this paper. 
+
+To allow the actor to sample cues with low predictive value we set the temperature parameter $\eta$ to 30 and the initial predictive value of each cue, both target and unique cues, $v_{i}$, $i \in [1,...,k]$, to 0.05. Unless otherwise noted, the value of $\lambda$ was set to 1 for reward trials and to zero for non-rewarded trials. Finally, we assume that the agent represents an additional unique cue for each one of the possible combinations of cues (for example, if the compound ABC is presented, we assume that there is an additional unique cue represented for each possible pair---AB, AC, BC---and the compound of three cues---ABC). We ran 80 simulations for each experimental design. The values shown in the following figures are the average values across all simulations. 
+
+<!-- ![(A) Simulations of the EVS model. Left panel shows the results of a summation experiment when the salience of A is equal to the salience of B. The middle panel shows the simulations of Experiment 2, where the salience of B is higher than that of A, but B predicts a lower outcome value. The right panel shows the simulations of Experiment 3, where the salience of B was higher than that of A but the outcome value predicted by B was higher than the value predicted by A. (C) Simulations of a EVS model for Experiment 3 of Pearce and Wilson (1991). The experiment comprises a first phase of the form A+/AB-, which turns B into a conditioned inhibitor. In the second phase, B is reinforced in isolation.](figures/all_figs/sims.001.jpeg){width=100%} -->
+
+## Summation
+As we have previously noted, support for configural theory comes from studies in pigeon auto-shaping [@aydin1995summation; @aydin1997some]. In these studies, a summation effect is usually not found when visual stimuli are presented in compounds. The purpose of this section is to simulate these summation procedures and the results obtained in Experiments 2 and 3 reported here. 
+
+We start by simulating the conditions of autoshaping in pigeons. To this end, we assume that both components predict the same outcome value and have equal saliencies ($\alpha_{A}=\alpha_{B} =.4$). The results of this simulation are shown in the right panel of Figure 5a. As shown in the figure, the EVS model correctly predicts the failure to find a summation effect when an inefficient search strategy is adopted. Importantly, as can be seen in the left hand panel of Figure 5a, a similar result has been reported by Rescorla and Coldwell [-@rescorla1995summation]. Intuitively, during the test phase the actor sometimes samples the unique cue that is only represented in the testing phase, which tends to bring down responding to AB compared to the elements A and B.
+
+![(a) Simulations of the EVS model for different summation designs. The left panel shows the results obtained by Rescorla and Coldwell (1995) using pigeon autoshaping. The right panel shows the simulations of the model assuming that the saliencies of A and B are equal. (b) Results of a simulation of Experiment 2, where the salience of B is assumed to be higher than that of A, but B predicts a lower outcome value. (c) Results of a simulation of Experiment 3, where the salience of B was higher than that of A but the outcome value predicted by B was higher than the value predicted by A.](figures/all_figs/plot_summation.jpeg){width=100%}
+
+<!-- In several of these studies, response rates do not sum when uni-modal visual stimuli are presented in compounds. Although modifications of elemental theory might accommodate these results, systematic failures to find summation are only predicted by something akin to configural processing ["context-specific" encoding of stimuli; see @Wagner2008]. -->
+
+<!-- COMMENT: The end of this last paragraph doesn't make sense. The assumption written with symbols is that all component cues have the same salience. But then you say that the assumption is that the salience of the cues and the configural cues are equal, and this is assumed by Pearce. Either the symbols or the description needs to change. 
+
+OP: Right. Changed now.
+-->
+
+<!-- The reason for this negative summation effect is that the actor sometimes samples cue X during the test. --> 
+
+<!-- During training, the model learns that both A and B predict the outcome, but as the compound AB is never presented, the value of the configural cue X stays constant throughout training. During the test stage, when the compound AB is presented for the first time, the agent samples a single cue to process according to Equation \ref{eq:softmax}.  -->
+
+<!-- COMMENT: This simulation looks like it didn't run until asymptote. If the model kept running, both A and B should acquire v=1. In that case, the configural cue X would probably not be sampled as much and responding to AB would be equal to A and B. This could explain why sometimes people find averaging and sometimes response to AB lower than A and B in a summation experiment. However, another question is whether the model works at all when trained to asymptote... does it? Reviewers will note this and go after it -->
+
+In a second set of simulations, we investigated the predictions of the EVS model when cue B predicts a lower outcome value than A, trying to match the conditions of Experiment 2. As suggested by the data, participants' behaviour was driven by the higher salience of B, which led to the majority of them to sample this cue during the test stage. To account for the fact that B is more salient, we set the value of $\alpha_{A}$ to .4 and the value of $\alpha_{B}$ to .5. A value of .4 was also set to the unique cue X ($\alpha_{X}=.4$). To account for different outcome values predicted by each cue, we set $\lambda_{A}=1>\lambda_{B}=.95$. The model correctly predicts the pattern of results of Experiment 2, in that responding to A, the most salient cue, is higher than to B (see Figure 5b). The model also replicates our finding that responding to AB would be closer to B than to A. Lastly, we tried to match the conditions of Experiment 3 by reversing the roles of A and B, so that B predicts a higher outcome value than A ($\lambda_{A}=.95, \lambda_{B}=1$). Again, the EVS model correctly captures the pattern of behaviour observed in this experiment, in that responding to AB should be closer to the outcome predicted by B, and higher than in Experiment 2 (see Figure 5c).
+
+## Differential summation
+In another experiment in pigeon auto-shaping, Pearce and colleagues [-@aydin1997some] obtained further evidence in favor of configural processing. Using visual stimuli, these authors found that responding at test for the compound of three cues, ABC, was weaker when the three cues were separately paired with a reward (A+, B+, C+) than when the cues were paired with the same reward, but in compounds (AB+, AC+, BC+)  (see Figure 6, left panel). Elemental models make the opposite prediction, but Pearce's configural model can account for these results. Figure 6 (right panel) depicts the simulations of this design in the EVS model. As can be seen, elemental processing with inefficient visual search correctly captures these results, since the value of the value of ABC is higher after training with the compounds AB, BC and AC, than separately training subjects with A, B and C. The reason why the EVS model correctly predicts this result concerns the type of representation for the compound ABC during testing. In the case of single-cue training, at the end of training ABC is comprised of four unique cues with very low predictive values (.05 each, by assumption), whereas the same ABC compund is comprised of the same four unique cues, some of which have been represented by the agent during training and have therefore acquired higher predictive values than in the case of single-cue training. During the presentation of ABC during the test, the actor sometimes sample these higher-valued unique cues. Consequently, subjects tend to respond more to the compound ABC after compound training than after single-cue training.  
+
+![Simulations of a EVS model for a differential summation design. Left panel. Results obtained by Pearce and colleagues (1997) in pigeon autoshaping. The bars show the responding to the compound ABC after training with the single cues A, B and C or after training with the compounds AB, BC, and AC. Right panel. Simulations of the EVS model for the same design. ](figures/all_figs/plot_diff_summation.jpeg){width=100%}
+
+## Reversing a conditioned inhibitor
+
+Pearce and Wilson ran an experiment which included a negative patterning design of the form A+, AB- in a first phase, and rewarded presentations of B alone in a second phase (B+). In the animal and human causal learning literature, the first phase turns cue B to what is called a *conditioned inhibitor*, meaning that B signals the absence of an otherwise present reward. In contrast to an elemental theory which would predict B to recover its predictive value so that responding to AB should be higher than A or B alone, Pearce and Wilson observed that responding to AB during test was indeed lower (see Figure 7, left panel). This result is also anticipated by the EVS model (see Figure 7, right panel). During the first stage, A acquires more value than B and the unique cue represented for AB. During the second stage, B acquires more value. During the final test with AB, however, the actor still samples the unique cue, whose value has not changed during the second phase, staying at a low level. Responding to AB is therefore lower than to either A or B.   
+
+![Simulations of a EVS model for Experiment 3 of Pearce and Wilson (1991). The experiment comprises a first phase where A is rewarded and the compound AB is not (A+, AB-). In the second phase B is rewarded in isolation. The left panel shows the original data obtained by these authors. Simulations of the EVS model are shown in the right panel.](figures/all_figs/PearceWilsonPlots.jpeg){width=100%}
+
+## Negative patterning 
+
+In another experiment in pigeons, Pearce and Redhead (1993, Exp. 1) found that subjects mastered a negative patterning discrimination (A+ AB-) easier than the same discrimination with an added redundant stimulus (AC+ ABC-). Figure 8a shows the results obtained by these authors in pigeons. The left panel shows the results observed after training with A+ and AB-; the right panel shows the results observed after training AC+ and ABC-. Given that the similarity between A and AB is lower than that of AC and ABC, an elemental approach anticipates that it will be easier for agents to master the discrimination in the group that is trained with A and AB separately than in the group trained with AC and ABC as compounds. Pearce's configural model (1987, 1994, 2002), by contrast, correctly predicts this result. The similarity between the training set AC and the compound ABC is higher than that between A and AB and, given that similarity determines how much the compound ABC is processed in each trial, it follows that agents should learn to respond less to the compound AB than to the compound ABC during training (see @Pearce2002; @pearce1994similarity). Here we show that the EVS model is also able to account for these results.
+
+It is relatively clear that when the actor of the EVS model is highly exploratory, solving this problem will be particularly difficult, as there needs to be less sampling of unique cues that have a low value during training. We therefore tested if our model would predict this behavioural pattern assuming a low exploratory agent ($\eta=5$) for which the unique cue for the compound ABC is more salient than the other cues, that is, $\alpha_{A}=\alpha_{B} =.4<\alpha_{X}=.7$, where $X$ is the unique cue for the compound ABC.Figure 8b shows the results of the simulations of these two negative patterning designs. The left panel shows the predictive value of A, and AB during training with a A+, AB- discrimination; the right panel shows a similar simulation for a AC-, ABC- design. The results of this simulation are reasonably in keeping with those obtained by Pearce and Redhead (1993): the difference in value between A and AB is higher than that between AC and ABC, and the order of values also follows the one obtained by these authors.
+
+These simulations have provided computational evidence for an elemental visual search approach. The results strengthen our hypothesis that the patterns of results taken as evidence for configural processing in the learning literature can be also captured by this new approach. Our simulations go beyond the empirical evidence presented in Experiments 1-3, showing how results from more complex designs than simple summation can also be accommodated by a reinforcement learning model based on elemental representations of stimuli with visual search.
+
+<!-- It is relatively clear that when the actor of the EVS model is highly exploratory, solving the negative patterning problem would be particularly difficult, as there needs to be less sampling of unique cues that have a low value during training.  -->
+
+![Simulations of the EVS model for a negative patterning design. (a) Data obtained by Pearce and Redhead (1993) in pigeons. The left panel shows responding to the compound to A and AB at the end of training after a discrimination with rewarded trials of A and non-rewarded trials with AB (A+, AB-). The right hand panel shows responding to the compounds AC and ABC at the end of training after a discrimination with rewarded trials of AC and non-rewarded trials with ABC (AC+, ABC-). (b) Simulations of the EVS model for a group trained on the A+, AB- discrimination (left panel) and for a group trained on the AC+, ABC- discrimination.](figures/all_figs/plot_neg_patterning.jpeg){width=100%}
+
+## Discussion
+In this paper, we have presented empirical and computational evidence supporting the hypothesis that many results from the learning literature usually thought to support configural processing of stimuli can be also explained by an alternative elemental view in which the learning process is governed by a critic that, combined with an actor's visual search mechanism, determines the cues that subjects sample and update during each training episode. We argued that task conditions fostering inefficient serial search on the stimulus compound are easily met by visual auto-shaping in pigeons, which explains the ease with which lack of summation is found using such a procedure. We also suggested that such conditions are more difficult to meet in human causal learning with visual stimuli, which explains our inability to reduce the summation effect through stimulus manipulations in previous studies [@Perez2018b]. 
+
+In Experiment 1, we showed that when task conditions foster inefficient visual search, it is possible to reduce the summation effect by increasing stimulus similarity. We also showed that, as would be predicted from the visual search literature [@duncan_visual_1989], not only similarity between the two target stimuli, but also similarity of target and non-target cues produces a reduction in the summation effect. In Experiments 2 and 3, we showed that when similar cues were used, producing no summation effect, responding to the compound AB depended strongly on responding to only one of the cues, as it would be expected from an inefficient serial search strategy rather than from configural stimulus processing.
+
+To further test this visual search hypothesis, we formalized a computational model, the EVS model, that implements our assumptions about the processes involved in these experiments. The model borrows concepts from the reinforcement learning literature, and in particular from the actor-critic model [@Maia2010; @ODoherty2004; @sutton1998reinforcement]. The critical assumption of the actor-critic model is the deployment of two different systems that contribute to each other so that the agent can choose which options are best to maximize reward in the long run. The EVS model follows a similar approach. One system, the critic, deploys an elemental learning algorithm as presented by Wagner and Rescorla (1972). What distinguishes our model from the ones offered in the learning literature is that an additional system, the actor, samples cues according to their current value and salience, factors that have been demonstrated to prompt sampling in the visual search literature [@anderson_value-driven_2011; @parkhurst2002modeling]. The actor, therefore, biases the critic to update the value of only one of the cues in each trial. 
+
+The EVS model shares some similarities with a previous model proposed by Harris [-@Harris2006; @harris2010attention], in which limited attentional capacities force stimulus representations of individual cues to be processed incompletely. This gating is dependent, in turn, on the predictive value of cues. However, while Harris' model is based on mechanisms of limited covert attention, our model assumes that sampling limitations of overt attention during visual search produce incomplete processing of stimuli in a compound. Similarly, the model proposed by Mackintosh [-@Mackintosh1975] shares with our model the assumption that the most predictive cues should command more attention, but differs with ours in that what is updated on every trial is the learning rate or associability of the most predictive stimulus, rather than the probability of the stimulus being processed on a given trial. 
+
+Although our claim in this paper is not that all evidence of configural processing is due to an elemental search process, nor that the EVS model is a good candidate for a complete model of associative or causal learning, the model can also capture a number of basic phenomena from the associative learning literature (see Supplemental Material for simulations). One such phenomenon is external inhibition [@pavlov1927conditioned], in which less responding is obtained to a compound AB during testing after training with one of the elements than responding to the single cue A alone. Pearce's configural model can readily explain this result because the activation of the configural unit AB depends on the similarity between AB and A, which is only .5. In the EVS model, by contrast, external inhibition is anticipated because after A has acquired significant predictive value during training, the presentation of AB during the test is represented as ABX. Subjects then sample in this space and process B and X according to the softmax activation function [@sutton1998reinforcement]. Since B and X have both a low predictive value, and are sometimes sampled, the average responding to AB will be lower than to A, and external inhibition is obtained. 
+
+This attentional mechanism for external inhibition is not new. Pavlov himself had a similar explanation for it [-@pavlov1927conditioned]. According to Pavlov, the presentation of the added cue B during the test stage makes the animal orient (i.e., attend) to it, so that the previous cue A is not processed (i.e., sampled) as it would otherwise be, explaining why responding to the compound AB during the test is lower than responding to A alone. 
+
+A number of other learning phenomena, usually known as cue competition phenomena, are also anticipated by our model. In these type of procedures it is usually found that the predictive value of a cue can impede the value otherwise normally accrued to other target cues. Blocking is perhaps the best-known example of cue competition. In a blocking procedure, after having trained A to predict an outcome, A is trained in compound with another cue B during a second stage. Responding to B is then tested against a group that did not undergo the first stage with A and it is usually found that the value of this latter cue B is higher than that of the cue B trained in compound. In terms of the EVS model, the second stage in which A and B are trained in compound produces a visual search in which the added cue B is sampled only in some of the trials as a consequence of the higher predictive value of A at the start of the second stage [@Kamin1969; @Mackintosha]. Compared to a group that has not undergone the first stage of training, responding to B will be lower, and blocking follows. In addition, when compounds are presented during training the sampling mechanism of the EVS model makes it so that, for the same amount of training, each cue is sampled only half the time it would have been processed during training with either of the single cues alone; the sequential search process will then explain why training compounds brings about less responding to each cue than training the cues in isolation (overshadowing; @Mackintosh1976; @Soto2012a). 
+
+Regardless of the generalizability of the EVS model, the empirical and computational evidence in this paper suggests that results usually interpreted in favor of configural processing may be also explained as a consequence of elemental processing combined with visual search strategies. As we have seen, this theory is able to account for the results shown in this paper, and the EVS model can capture the present and previous data on generalisation better than configural models. Our work thus bridges two seemingly unrelated areas of experimental psychology and leads to a more parsimonious explanation of the results of summation experiments across species, and the discovery of new principles underlying the generalisation of learning.
+
+<!-- # Method -->
+
+<!-- ## Experiment 1 -->
+
+<!-- ### Participants -->
+<!-- 86 undergraduate students from Florida International University participated in Experiment 1. Participants did not have previous experience with the experimental procedure and were tested simultaneously and in the same room. The procedures were approved by the Institutional Review Board at Florida International University. Participants were randomly assigned to one of three groups: *intra* $(n_{intra}=27)$, *extra1* $(n_{extra1}=28)$ and *extra2* $(n_{extra2}=31)$. The final number of participants in Experiment 1 was $n_{intra}=18$, $n_{extra1}=13$, $n_{extra2}=27$. -->
+
+<!-- ### Materials -->
+<!-- Participants were tested in Windows (c) computers running Psychopy [@peirce2007psychopy] 1.75. Responses were recorded from standard PC keyboards. -->
+
+<!-- ### Procedure -->
+<!-- Participants were presented with a task in which they were asked to play the role of an allergist that had to predict the levels of allergy caused by different drugs in a hypothetical patient, Mr. X (see Figure 1B) [@Soto2009; @Perez2018b]. During training, one or two drugs were presented as different abstract shapes (see Figure 1), and participants were required to give an assessment of the level of allergy that each drug would cause in Mr. X in a scale of 0 to 35. Two trials per each cue were presented during the testing stage. -->
+
+<!-- Groups differed in the similarity between cues in the display (see Figure 1A). Each stimulus was created from three different cues that "branched out" from a central point. Among these branches, only one of them represented the target cue associated with either allergy or no allergy during training. The other two branches were non-target cues that could not predict the presence or absence of allergy. During the test, the compound AB was comprised by two target branches together with an additional non-target cue. In group *intra*, all these "branches" were of the same color (black), but differed in shape. In group *extra1*, A and B differed in color (grey and black), but they shared color with the non-target cues (X and Y, one grey and one black). In group *extra2*, the target cues were the same as in group *extra1*, but now the background stimuli had a distinctive color as well. In all groups, A and B, which predicted allergy, shared color with cues C and D, which predicted no allergy. Thus, all participants, regardless of group, had to attend to shape. Color, on the other hand, was irrelevant to solve the discrimination. -->
+
+<!-- ## Experiment 2 -->
+
+<!-- ### Participants -->
+<!-- 75 undergraduate students from Florida International University were randomly assigned to one of two groups ($n_{intra} = 40, n_{intra2} = 35$) and were compensated with course credit for their participation. The final number of participants per group was therefore $n_{intra}=40$, $n_{intra2}=33$. -->
+
+<!-- ### Materials -->
+<!-- Participants were tested as described for group *intra* of Experiment 1 using Windows (c) computers running Psychopy [@peirce2007psychopy] 1.82.4. -->
+
+<!-- ### Procedure -->
+<!-- The procedure was the same as described for group *intra* of Experiment 1, with only one exception: In group *intra2*, stimulus B was associated with 8 points of allergy during training (see Figure 4). -->
+
+<!-- ## Experiment 3 -->
+
+<!-- ### Participants -->
+<!-- 80 undergraduate students from Florida International University were randomly assigned to one of two groups ($n_{intra} = 42, n_{intra2} = 38$) and were tested under the same conditions of Experiment 2. Twenty six participants failed to meet the inclusion criteria and were discarded from the statistical analysis. The final number of participants per group was $n_{intra}=22$, $n_{intra2}=32$. -->
+
+<!-- ### Materials -->
+<!-- Participants were tested in the same way as in Experiment 2. -->
+
+<!-- ### Procedure -->
+<!-- The procedure was the same as in Experiment 2. Only the outcomes of A and B were interchanged in group *intra2*. The outcome assigned to A was 10 while a value of 8 was assigned to B.  -->
+
+# Acknowledgements
+We thank Jaron Colas and Tony Dickinson for their insightful comments on a previous version of this manuscript, and S.D.G. for all the inspiration.
+
+<!-- # Context -->
+<!-- \textcolor{black}{The theory we posit in this article was the product of a research agenda of more than 10 years on stimulus representation. After having analyzed and thought through our own data in humans showing that summation was not affected by similarity, we started thinking about the reasons for the discrepancy with the animal data, particularly in pigeons. Again, our own experience with pigeon experiments led us to realize that configural processing might be interpreted as inefficient sampling of stimuli in a visual search process. The design and theory presented here was therefore a gradual process of systematic data collection, which finally led to a theory which finds strong support in this paper, and that seems to be generalizable to previous generalisation data in animals as well.}  -->
+
+# References
